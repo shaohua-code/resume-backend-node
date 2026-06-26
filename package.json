@@ -1,0 +1,25 @@
+{
+  "name": "resume-backend-node",
+  "version": "1.0.0",
+  "description": "AI简历助手（校园版）后端API - Node.js + Supabase 版本",
+  "main": "main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node main.js",
+    "dev": "nodemon main.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "axios": "^1.7.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "express-validator": "^7.2.0",
+    "multer": "^2.2.0",
+    "pdf-parse": "^1.1.4",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.7"
+  }
+}
