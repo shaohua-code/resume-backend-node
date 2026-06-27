@@ -8,6 +8,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { sendOtp, verifyOtp, refreshSession } = require('../services/auth_service');
+const { ensureUserProfile } = require('../services/user_profile_service');
 
 const router = express.Router();
 
@@ -64,7 +65,8 @@ router.post(
       const data = await verifyOtp(email, code);
       const user = data.user;
       const session = data.session;
-      const nickname = (user.user_metadata && user.user_metadata.nickname) || email.split('@')[0];
+      const profile = await ensureUserProfile(user);
+      const nickname = profile.nickname || (user.user_metadata && user.user_metadata.nickname) || email.split('@')[0];
       return res.json({
         token: session.access_token,
         refresh_token: session.refresh_token,
@@ -72,6 +74,10 @@ router.post(
         email: user.email,
         nickname,
         user_id: user.id,
+        role: profile.role,
+        status: profile.status,
+        vip_expire_time: profile.vip_expire_time,
+        permissions: profile.permissions,
       });
     } catch (e) {
       return res.status(400).json({ detail: e.message || '验证码错误或已过期' });
@@ -94,10 +100,15 @@ router.post(
     try {
       const data = await refreshSession(req.body.refresh_token);
       const session = data.session;
+      const profile = data.user ? await ensureUserProfile(data.user) : null;
       return res.json({
         token: session.access_token,
         refresh_token: session.refresh_token,
         expires_at: session.expires_at,
+        role: profile ? profile.role : undefined,
+        status: profile ? profile.status : undefined,
+        vip_expire_time: profile ? profile.vip_expire_time : undefined,
+        permissions: profile ? profile.permissions : undefined,
       });
     } catch (e) {
       return res.status(401).json({ detail: e.message || '刷新令牌无效或已过期' });

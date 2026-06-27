@@ -17,11 +17,57 @@ const pdfParse = require('pdf-parse');
 const { supabaseAdmin } = require('../supabaseClient');
 const aiService = require('../services/ai_service');
 const { authRequired } = require('../middlewares/auth');
+const { PERMISSIONS, hasPermission, isAdminRole } = require('../utils/permissions');
 
 const router = express.Router();
 
 function getRequestedModel(req) {
   return (req.body && req.body.model) || req.query.model || '';
+}
+
+async function getAiDailyLimit(role) {
+  const { data } = await supabaseAdmin
+    .from('system_config')
+    .select('config_value')
+    .eq('config_key', 'ai_daily_limit')
+    .single();
+  const limitMap = (data && data.config_value) || { USER: 3, VIP: -1 };
+  return Number(Object.prototype.hasOwnProperty.call(limitMap, role) ? limitMap[role] : 3);
+}
+
+async function ensureAiQuota(req, taskType) {
+  if (isAdminRole(req.user.role) || hasPermission(req.user.role, PERMISSIONS.VIP_AI_UNLIMITED)) {
+    return;
+  }
+  const limit = await getAiDailyLimit(req.user.role);
+  if (limit < 0) {
+    return;
+  }
+  const dayStart = new Date();
+  dayStart.setHours(0, 0, 0, 0);
+  const { count } = await supabaseAdmin
+    .from('ai_call_record')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', req.user.id)
+    .eq('task_type', taskType)
+    .gte('create_time', dayStart.toISOString());
+  if ((count || 0) >= limit) {
+    const err = new Error(`今日${taskType}次数已用完，请升级 VIP 解锁不限次数`);
+    err.code = 'AI_LIMIT_EXCEEDED';
+    throw err;
+  }
+}
+
+async function recordAiCall(req, taskType, model, success, errorMessage = '') {
+  // AI调用日志用于次数限制、后台审计和数据统计，失败也记录便于排查。
+  await supabaseAdmin.from('ai_call_record').insert({
+    user_id: req.user.id,
+    task_type: taskType,
+    model: model || '',
+    success,
+    error_message: errorMessage,
+    create_time: new Date().toISOString(),
+  });
 }
 
 // 上传文件目录：每个用户只保留一份PDF简历
@@ -59,14 +105,23 @@ router.use(authRequired);
  * 调用 DeepSeek 生成专业校招简历内容
  */
 router.post('/generate', async (req, res) => {
+  const taskType = 'resume_generate';
+  const model = getRequestedModel(req);
   try {
+    await ensureAiQuota(req, taskType);
     const userInput = JSON.stringify(req.body || {});
-    const result = await aiService.generateResume(userInput, { model: getRequestedModel(req) });
+    const result = await aiService.generateResume(userInput, { model });
     if (!result || Object.keys(result).length === 0) {
+      await recordAiCall(req, taskType, model, false, 'AI生成简历失败，请重试');
       return res.status(500).json({ detail: 'AI生成简历失败，请重试' });
     }
+    await recordAiCall(req, taskType, model, true);
     return res.json({ success: true, data: result });
   } catch (e) {
+    if (e.code === 'AI_LIMIT_EXCEEDED') {
+      return res.status(403).json({ detail: e.message });
+    }
+    await recordAiCall(req, taskType, model, false, e.message);
     if (e.code === 'CONFIG_MISSING') {
       return res.status(400).json({ detail: e.message });
     }
@@ -78,17 +133,26 @@ router.post('/generate', async (req, res) => {
  * AI优化项目描述接口
  */
 router.post('/optimize', async (req, res) => {
+  const taskType = 'project_optimize';
+  const model = getRequestedModel(req);
   try {
+    await ensureAiQuota(req, taskType);
     const { project_description, target_position } = req.body || {};
     if (!project_description) {
       return res.status(400).json({ detail: 'project_description 不能为空' });
     }
-    const result = await aiService.optimizeProject(project_description, target_position || '', { model: getRequestedModel(req) });
+    const result = await aiService.optimizeProject(project_description, target_position || '', { model });
     if (!result || Object.keys(result).length === 0) {
+      await recordAiCall(req, taskType, model, false, 'AI优化失败，请重试');
       return res.status(500).json({ detail: 'AI优化失败，请重试' });
     }
+    await recordAiCall(req, taskType, model, true);
     return res.json({ success: true, data: result });
   } catch (e) {
+    if (e.code === 'AI_LIMIT_EXCEEDED') {
+      return res.status(403).json({ detail: e.message });
+    }
+    await recordAiCall(req, taskType, model, false, e.message);
     if (e.code === 'CONFIG_MISSING') {
       return res.status(400).json({ detail: e.message });
     }
@@ -100,34 +164,60 @@ router.post('/optimize', async (req, res) => {
  * JD岗位匹配分析接口
  */
 router.post('/match', async (req, res) => {
-  const { resume_id, jd_text } = req.body || {};
-  const { data: resume, error } = await supabaseAdmin
-    .from('resume')
-    .select('*')
-    .eq('id', resume_id)
-    .single();
-  if (error || !resume) {
-    return res.status(404).json({ detail: '简历不存在' });
+  const taskType = 'jd_match';
+  const model = getRequestedModel(req);
+  try {
+    await ensureAiQuota(req, taskType);
+    const { resume_id, jd_text } = req.body || {};
+    const { data: resume, error } = await supabaseAdmin
+      .from('resume')
+      .select('*')
+      .eq('id', resume_id)
+      .eq('user_id', req.user.id)
+      .single();
+    if (error || !resume) {
+      return res.status(404).json({ detail: '简历不存在' });
+    }
+    const matchData = await aiService.matchJd(resume.resume_json, jd_text || '', { model });
+    await recordAiCall(req, taskType, model, true);
+    return res.json({ success: true, data: matchData, message: '匹配分析完成' });
+  } catch (e) {
+    if (e.code === 'AI_LIMIT_EXCEEDED') {
+      return res.status(403).json({ detail: e.message });
+    }
+    await recordAiCall(req, taskType, model, false, e.message);
+    return res.status(500).json({ detail: `AI服务调用失败：${e.message}` });
   }
-  const matchData = await aiService.matchJd(resume.resume_json, jd_text || '', { model: getRequestedModel(req) });
-  return res.json({ success: true, data: matchData, message: '匹配分析完成' });
 });
 
 /**
  * AI简历评分接口
  */
 router.post('/score', async (req, res) => {
-  const resumeId = req.query.resume_id || (req.body && req.body.resume_id);
-  const { data: resume, error } = await supabaseAdmin
-    .from('resume')
-    .select('*')
-    .eq('id', resumeId)
-    .single();
-  if (error || !resume) {
-    return res.status(404).json({ detail: '简历不存在' });
+  const taskType = 'score';
+  const model = getRequestedModel(req);
+  try {
+    await ensureAiQuota(req, taskType);
+    const resumeId = req.query.resume_id || (req.body && req.body.resume_id);
+    const { data: resume, error } = await supabaseAdmin
+      .from('resume')
+      .select('*')
+      .eq('id', resumeId)
+      .eq('user_id', req.user.id)
+      .single();
+    if (error || !resume) {
+      return res.status(404).json({ detail: '简历不存在' });
+    }
+    const scoreData = await aiService.scoreResume(resume.resume_json, { model });
+    await recordAiCall(req, taskType, model, true);
+    return res.json({ success: true, data: scoreData, message: '评分完成' });
+  } catch (e) {
+    if (e.code === 'AI_LIMIT_EXCEEDED') {
+      return res.status(403).json({ detail: e.message });
+    }
+    await recordAiCall(req, taskType, model, false, e.message);
+    return res.status(500).json({ detail: `AI服务调用失败：${e.message}` });
   }
-  const scoreData = await aiService.scoreResume(resume.resume_json, { model: getRequestedModel(req) });
-  return res.json({ success: true, data: scoreData, message: '评分完成' });
 });
 
 /**
@@ -316,11 +406,13 @@ router.get('/list', async (req, res) => {
  * 获取简历详情接口
  */
 router.get('/detail', async (req, res) => {
+  const userId = req.user.id;
   const resumeId = req.query.resume_id;
   const { data: resume, error } = await supabaseAdmin
     .from('resume')
     .select('*')
     .eq('id', resumeId)
+    .eq('user_id', userId)
     .single();
   if (error || !resume) {
     return res.status(404).json({ detail: '简历不存在' });
@@ -364,12 +456,16 @@ router.delete('/delete', async (req, res) => {
 router.post('/export', async (req, res) => {
   const userId = req.user.id;
   const resumeId = req.query.resume_id || (req.body && req.body.resume_id);
+  if (!hasPermission(req.user.role, PERMISSIONS.VIP_EXPORT)) {
+    return res.status(403).json({ detail: '普通用户暂不支持导出，请升级 VIP 后使用' });
+  }
 
   // 验证简历存在
   const { data: resume } = await supabaseAdmin
     .from('resume')
     .select('id')
     .eq('id', resumeId)
+    .eq('user_id', userId)
     .single();
   if (!resume) {
     return res.status(404).json({ detail: '简历不存在' });
@@ -400,6 +496,8 @@ router.post('/export', async (req, res) => {
 router.post('/uploadOptimize', (req, res) => {
   // 这里手动调用 multer，便于在 fileFilter 报错时也返回 JSON
   upload.single('file')(req, res, async (uploadErr) => {
+    const taskType = 'pdf_optimize';
+    const model = getRequestedModel(req);
     if (uploadErr) {
       return res.status(400).json({ detail: uploadErr.message || '文件上传失败' });
     }
@@ -411,6 +509,7 @@ router.post('/uploadOptimize', (req, res) => {
     const targetPosition = (req.body && req.body.target_position) || '';
 
     try {
+      await ensureAiQuota(req, taskType);
       // 1. 解析 PDF 文本
       const dataBuffer = fs.readFileSync(filePath);
       const pdfData = await pdfParse(dataBuffer);
@@ -424,12 +523,14 @@ router.post('/uploadOptimize', (req, res) => {
       const truncated = pdfText.length > 8000 ? pdfText.slice(0, 8000) : pdfText;
 
       // 2. 调用 AI 整体优化
-      const result = await aiService.optimizeFromPdfText(truncated, targetPosition, { model: getRequestedModel(req) });
+      const result = await aiService.optimizeFromPdfText(truncated, targetPosition, { model });
 
       if (!result || !result.resume || Object.keys(result.resume).length === 0) {
+        await recordAiCall(req, taskType, model, false, 'AI优化失败，请重试');
         return res.status(500).json({ detail: 'AI优化失败，请重试' });
       }
 
+      await recordAiCall(req, taskType, model, true);
       return res.json({
         success: true,
         data: {
@@ -444,6 +545,10 @@ router.post('/uploadOptimize', (req, res) => {
       if (e.code === 'CONFIG_MISSING') {
         return res.status(400).json({ detail: e.message });
       }
+      if (e.code === 'AI_LIMIT_EXCEEDED') {
+        return res.status(403).json({ detail: e.message });
+      }
+      await recordAiCall(req, taskType, model, false, e.message);
       console.error('[uploadOptimize] error:', e);
       return res.status(500).json({ detail: `处理失败：${e.message}` });
     }

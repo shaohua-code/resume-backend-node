@@ -5,6 +5,7 @@
  */
 
 const { getUserByToken } = require('../services/auth_service');
+const { ensureUserProfile } = require('../services/user_profile_service');
 
 async function authRequired(req, res, next) {
   const authorization = req.headers.authorization || '';
@@ -16,9 +17,22 @@ async function authRequired(req, res, next) {
   if (!user) {
     return res.status(401).json({ detail: '令牌无效或已过期' });
   }
-  // 将 Supabase user 对象挂到 req.user 上，包含 id（uuid）、email、user_metadata 等
-  req.user = user;
-  next();
+  try {
+    const profile = await ensureUserProfile(user);
+    if (profile.status === 'BANNED') {
+      return res.status(403).json({ detail: '账号已被封禁，请联系管理员' });
+    }
+    // 将业务资料挂到 req.user，后续路由可直接读取角色和权限。
+    req.user = {
+      ...user,
+      profile,
+      role: profile.role,
+      permissions: profile.permissions,
+    };
+    next();
+  } catch (e) {
+    return res.status(500).json({ detail: `读取用户权限失败：${e.message}` });
+  }
 }
 
 module.exports = { authRequired };

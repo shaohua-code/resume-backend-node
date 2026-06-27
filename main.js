@@ -9,6 +9,7 @@ const cors = require('cors');
 const { settings } = require('./config');
 const authRouter = require('./routers/auth');
 const resumeRouter = require('./routers/resume');
+const adminRouter = require('./routers/admin');
 
 const app = express();
 
@@ -30,6 +31,7 @@ app.get('/', (req, res) => {
 
 app.use('/api/auth', authRouter);
 app.use('/api/resume', resumeRouter);
+app.use('/api/admin', adminRouter);
 
 app.use((err, req, res, next) => {
   console.error('[全局错误]', err);
