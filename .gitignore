@@ -53,7 +53,6 @@ htmlcov/
 .nox/
 coverage.xml
 *.cover
-resume-backend-node/.env.example
 # ========== 类型检查缓存 ==========
 .mypy_cache/
 .ruff_cache/
@@ -67,3 +66,6 @@ resume-backend-node/.env.example
 *.tmp
 *.bak
 *.orig
+
+# ========== 环境变量示例文件（含真实密钥，禁止上传）==========
+.env.example
