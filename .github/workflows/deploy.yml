@@ -10,6 +10,38 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 调试 Secret 是否读取正确（GitHub 会对 Secret 值脱敏为 ***，但长度/格式问题仍可定位）
+      - name: Debug deploy secrets
+        env:
+          SERVER_IP: ${{ secrets.SERVER_IP }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PASS: ${{ secrets.SERVER_PASS }}
+        run: |
+          echo "========== Secret 调试信息 =========="
+          echo "SERVER_IP 原始值: [${SERVER_IP}]"
+          echo "SERVER_IP 长度: ${#SERVER_IP}"
+          echo "SERVER_IP 是否为空: $([ -z "$SERVER_IP" ] && echo '是' || echo '否')"
+          if echo "$SERVER_IP" | grep -q '[[:space:]]'; then
+            echo "SERVER_IP 警告: 包含空格或换行，请去掉前后空白"
+          fi
+          if echo "$SERVER_IP" | grep -qE '^https?://'; then
+            echo "SERVER_IP 警告: 不要写 http:// 或 https://，只填 IP 或域名"
+          fi
+          if echo "$SERVER_IP" | grep -q ':'; then
+            echo "SERVER_IP 警告: host 里不要带端口，端口应写在 port: 22"
+          fi
+          echo "SERVER_USER 原始值: [${SERVER_USER}]"
+          echo "SERVER_USER 长度: ${#SERVER_USER}"
+          echo "SERVER_PASS 是否已配置: $([ -n "$SERVER_PASS" ] && echo '是' || echo '否')"
+          echo "SERVER_PASS 长度: ${#SERVER_PASS}"
+          echo "========== DNS 解析测试 =========="
+          if [ -n "$SERVER_IP" ]; then
+            nslookup "$SERVER_IP" || echo "nslookup 失败: 无法解析该 host"
+            getent hosts "$SERVER_IP" || echo "getent 失败: 无法解析该 host"
+          else
+            echo "跳过 DNS 测试: SERVER_IP 为空"
+          fi
+
       - name: SSH Deploy to Server
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -17,8 +49,9 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASS }}
           port: 22
+          debug: true
           script: |
             cd /www/wwwroot/resume-backend-node
             git pull origin main
             npm install
-            pm2 restart resume-backend-node 
+            pm2 restart resume-backend-node
