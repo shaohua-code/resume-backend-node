@@ -1,0 +1,24 @@
+name: Auto Deploy Backend
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: SSH Deploy to Server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASS }}
+          port: 22
+          script: |
+            cd /www/wwwroot/resume-backend-node
+            git pull origin main
+            npm install
+            pm2 restart resume-api
