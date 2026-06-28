@@ -21,4 +21,4 @@ jobs:
             cd /www/wwwroot/resume-backend-node
             git pull origin main
             npm install
-            pm2 restart resume-api
+            pm2 restart resume-backend-node 
