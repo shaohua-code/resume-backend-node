@@ -1,19 +1,24 @@
 name: 自动部署后端
+
 on:
   push:
-    branches: [ main ] # 你代码推送的分支
+    branches: [main]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
       - name: SSH连接服务器执行部署脚本
-        uses: appleboy/ssh-action@master
+        uses: appleboy/ssh-action@v1.2.0
         with:
-          host: ${{ secrets.SERVER_IP }}
-          username: ${{ secrets.SERVER_USER }}
+          host: 120.25.234.199
+          username: root
           password: ${{ secrets.SERVER_PASS }}
           port: 22
+          timeout: 60s
+          command_timeout: 10m
+          debug: true
           script: |
-            cd /www/wwwroot/resume-backend-node
+            cd /www/wwwroot/resume-backend-node || exit 1
+            chmod +x deploy.sh
             ./deploy.sh
