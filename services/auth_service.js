@@ -1,11 +1,9 @@
 /**
  * 认证服务模块
- * 基于 Supabase Auth 实现邮箱验证码（OTP）登录
- *
- * Supabase Auth 流程：
- * 1. 调用 signInWithOtp({ email })，Supabase 自动发送验证码邮件给用户
- * 2. 调用 verifyOtp({ email, token, type: 'email' })，校验验证码并返回 access_token
- * 3. 后续请求携带 access_token，调用 getUser(token) 解析用户信息
+ * 基于 Supabase Auth 实现三种认证方式：
+ * 1. 邮箱验证码（OTP）登录 - signInWithOtp + verifyOtp
+ * 2. 邮箱验证码通过后设置密码注册 / 邮箱或用户名 + 密码登录
+ * 3. 密码重置 - resetPasswordForEmail + updateUser
  *
  * 用户表由 Supabase Auth 自动维护（auth.users 表），无需自己管理用户注册流程
  */
@@ -84,10 +82,75 @@ async function updateUserMetadata(userId, metadata) {
   return data.user;
 }
 
+/**
+ * 邮箱验证码通过后设置密码和用户名
+ * 注册前已经通过 verifyOtp 证明邮箱归属，这里只负责补齐密码与用户元数据。
+ */
+async function setPasswordAfterEmailVerified(userId, password, username) {
+  const { data, error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+    password,
+    user_metadata: { username, nickname: username },
+  });
+  if (error) throw error;
+  return data.user;
+}
+
+/**
+ * 邮箱 + 密码登录
+ * @returns {Promise<{user, session}>}
+ */
+async function signInWithPassword(email, password) {
+  const { data, error } = await supabaseAuth.auth.signInWithPassword({
+    email,
+    password,
+  });
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * 根据邮箱或用户名解析登录邮箱
+ * 用户名保存在业务 profile 的 nickname 字段，最终仍使用 Supabase 邮箱密码登录。
+ */
+async function resolveLoginEmail(identifier) {
+  const account = String(identifier || '').trim();
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(account)) {
+    return account;
+  }
+  const { data, error } = await supabaseAdmin
+    .from('user_profile')
+    .select('email')
+    .eq('nickname', account)
+    .single();
+  if (error || !data || !data.email) {
+    const err = new Error('账号不存在');
+    err.statusCode = 404;
+    throw err;
+  }
+  return data.email;
+}
+
+/**
+ * 检查用户名是否已被业务资料占用
+ * 用户名映射到 user_profile.nickname，用于用户名密码登录。
+ */
+async function isUsernameTaken(username) {
+  const { count, error } = await supabaseAdmin
+    .from('user_profile')
+    .select('user_id', { count: 'exact', head: true })
+    .eq('nickname', username);
+  if (error) throw error;
+  return (count || 0) > 0;
+}
+
 module.exports = {
   sendOtp,
   verifyOtp,
   getUserByToken,
   refreshSession,
   updateUserMetadata,
+  setPasswordAfterEmailVerified,
+  signInWithPassword,
+  resolveLoginEmail,
+  isUsernameTaken,
 };
