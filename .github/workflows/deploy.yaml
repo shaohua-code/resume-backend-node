@@ -1,0 +1,12 @@
+- name: Deploy
+  uses: appleboy/ssh-action@v1.0.3
+  with:
+    host: ${{ secrets.HOST }}
+    username: root
+    password: ${{ secrets.PASSWORD }}
+    port: 22
+    script: |
+      cd /www/wwwroot/resume-backend-node
+      git pull origin main
+      npm install
+      pm2 restart resume-backend-node
