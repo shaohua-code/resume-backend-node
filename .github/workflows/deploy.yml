@@ -45,11 +45,11 @@ jobs:
       - name: SSH Deploy to Server
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SERVER_IP }}
-          username: ${{ secrets.SERVER_USER }}
+          host: 120.25.234.199
+          username: root
+          # 密码不要写进仓库，请在 GitHub Secrets 配置 SERVER_PASS
           password: ${{ secrets.SERVER_PASS }}
           port: 22
-          debug: true
           script: |
             cd /www/wwwroot/resume-backend-node
             git pull origin main
