@@ -21,6 +21,6 @@ npm install
 
 echo "pm2 restart resume-backend-node 重启中"
 # 重启项目resume-backend-node 项目名 ****重点
-pm2 restart resume-backend-node
+# pm2 restart resume-backend-node
 
 echo "===== 部署完成 $(date) ====="
