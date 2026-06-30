@@ -18,7 +18,8 @@ git pull --no-progress origin main --ff-only
 echo "执行 npm install"
 npm install
 
-echo "pm2 restart resume-backend 重启中"
-pm2 restart resume-backend
+echo "pm2 restart resume-backend-node 重启中"
+# 重启项目
+pm2 restart resume-backend-node
 
 echo "===== 部署完成 $(date) ====="
