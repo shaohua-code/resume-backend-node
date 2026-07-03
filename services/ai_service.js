@@ -159,11 +159,75 @@ function format(tpl, vars) {
 }
 
 /**
- * 调用 DeepSeek API 的通用方法
+ * 调用 DeepSeek API 的通用方法（流式）
+ * @param {string} prompt 发送给AI的完整提示词
+ * @param {object} options 调用配置
+ * @param {(chunk: string) => void} onChunk 每收到一段文本时的回调
+ * @returns {Promise<string>} AI 生成的完整文本
+ */
+async function callDeepseekStream(prompt, options = {}, onChunk) {
+  if (!settings.DEEPSEEK_API_KEY || !settings.DEEPSEEK_API_KEY.trim()) {
+    const err = new Error(
+      'DeepSeek API Key 未配置！请在 .env 文件中设置 DEEPSEEK_API_KEY=你的密钥。' +
+        '获取地址：https://platform.deepseek.com/api_keys',
+    );
+    err.code = 'CONFIG_MISSING';
+    throw err;
+  }
+  const headers = {
+    Authorization: `Bearer ${settings.DEEPSEEK_API_KEY.trim()}`,
+    'Content-Type': 'application/json',
+  };
+  const model = resolveModel(options.task, options.model);
+  const payload = {
+    model,
+    messages: [{ role: 'user', content: prompt }],
+    temperature: 0.7,
+    max_tokens: 4096,
+    stream: true,
+  };
+  const response = await axios.post(settings.DEEPSEEK_API_URL, payload, {
+    headers,
+    responseType: 'stream',
+    timeout: 120000,
+  });
+
+  let fullText = '';
+  let buffer = '';
+
+  await new Promise((resolve, reject) => {
+    response.data.on('data', (chunk) => {
+      buffer += chunk.toString();
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const dataStr = trimmed.slice(5).trim();
+        if (dataStr === '[DONE]') continue;
+        try {
+          const parsed = JSON.parse(dataStr);
+          const delta = parsed.choices?.[0]?.delta?.content || '';
+          if (delta) {
+            fullText += delta;
+            if (typeof onChunk === 'function') onChunk(delta);
+          }
+        } catch (e) {
+          /* ignore partial json */
+        }
+      }
+    });
+    response.data.on('end', resolve);
+    response.data.on('error', reject);
+  });
+
+  return fullText;
+}
+
+/**
+ * 调用 DeepSeek API 的通用方法（非流式）
  * @param {string} prompt 发送给AI的完整提示词
  * @param {object} options 调用配置，支持按业务动态传入模型
- * @param {string} options.task 业务类型
- * @param {string} options.model 指定模型，优先级高于环境变量
  * @returns {Promise<string>} AI生成的文本内容
  */
 async function callDeepseek(prompt, options = {}) {
@@ -175,7 +239,7 @@ async function callDeepseek(prompt, options = {}) {
     );
     err.code = 'CONFIG_MISSING';
     throw err;
-  } 
+  }
   const headers = {
     Authorization: `Bearer ${settings.DEEPSEEK_API_KEY.trim()}`,
     'Content-Type': 'application/json',
@@ -192,6 +256,68 @@ async function callDeepseek(prompt, options = {}) {
     timeout: 60000,
   });
   return response.data.choices[0].message.content;
+}
+
+/**
+ * 流式调用 DeepSeek API - 通过 onChunk 回调推送增量文本
+ * @returns {Promise<string>} 完整生成文本
+ */
+async function callDeepseekStream(prompt, options = {}, onChunk) {
+  if (!settings.DEEPSEEK_API_KEY || !settings.DEEPSEEK_API_KEY.trim()) {
+    const err = new Error(
+      'DeepSeek API Key 未配置！请在 .env 文件中设置 DEEPSEEK_API_KEY=你的密钥。' +
+        '获取地址：https://platform.deepseek.com/api_keys',
+    );
+    err.code = 'CONFIG_MISSING';
+    throw err;
+  }
+  const headers = {
+    Authorization: `Bearer ${settings.DEEPSEEK_API_KEY.trim()}`,
+    'Content-Type': 'application/json',
+  };
+  const model = resolveModel(options.task, options.model);
+  const payload = {
+    model,
+    messages: [{ role: 'user', content: prompt }],
+    temperature: 0.7,
+    max_tokens: 4096,
+    stream: true,
+  };
+  const response = await axios.post(settings.DEEPSEEK_API_URL, payload, {
+    headers,
+    timeout: 120000,
+    responseType: 'stream',
+  });
+
+  return new Promise((resolve, reject) => {
+    let full = '';
+    let remainder = '';
+
+    response.data.on('data', (chunk) => {
+      remainder += chunk.toString();
+      const lines = remainder.split('\n');
+      remainder = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const data = trimmed.slice(5).trim();
+        if (data === '[DONE]') continue;
+        try {
+          const parsed = JSON.parse(data);
+          const content = parsed.choices?.[0]?.delta?.content || '';
+          if (content) {
+            full += content;
+            if (typeof onChunk === 'function') onChunk(content, full);
+          }
+        } catch (e) {
+          /* ignore partial json */
+        }
+      }
+    });
+
+    response.data.on('end', () => resolve(full));
+    response.data.on('error', reject);
+  });
 }
 
 /**
@@ -298,6 +424,19 @@ async function generateResume(userInput, options = {}) {
 }
 
 /**
+ * 流式 AI 生成简历 - 增量推送原始文本，最终解析 JSON
+ */
+async function generateResumeStream(userInput, options = {}, onChunk) {
+  const prompt = format(RESUME_GENERATE_PROMPT, { user_input: userInput });
+  const result = await callDeepseekStream(
+    prompt,
+    { task: AI_TASK.RESUME_GENERATE, model: options.model },
+    onChunk,
+  );
+  return extractJson(result);
+}
+
+/**
  * AI优化项目经历描述
  * 使用STAR法则优化用户原始项目描述，突出技术亮点和量化成果
  */
@@ -367,10 +506,36 @@ async function optimizeFromPdfText(pdfText, targetPosition = '', options = {}) {
   };
 }
 
+/**
+ * 流式 PDF 简历优化
+ */
+async function optimizeFromPdfTextStream(pdfText, targetPosition = '', options = {}, onChunk) {
+  const prompt = format(PDF_OPTIMIZE_PROMPT, {
+    pdf_text: pdfText,
+    target_position: targetPosition || '通用职业方向',
+  });
+  const result = await callDeepseekStream(
+    prompt,
+    { task: AI_TASK.PDF_OPTIMIZE, model: options.model },
+    onChunk,
+  );
+  const data = extractJson(result);
+  if (!data || Object.keys(data).length === 0) {
+    return { resume: {}, optimization_notes: [] };
+  }
+  const resume = normalizePdfResume(data);
+  return {
+    resume: hasResumeContent(resume) ? resume : {},
+    optimization_notes: data.optimization_notes || data.resume?.optimization_notes || [],
+  };
+}
+
 module.exports = {
   generateResume,
+  generateResumeStream,
   optimizeProject,
   matchJd,
   scoreResume,
   optimizeFromPdfText,
+  optimizeFromPdfTextStream,
 };

@@ -130,6 +130,51 @@ router.post('/generate', async (req, res) => {
 });
 
 /**
+ * AI生成简历接口（SSE 流式）
+ * 前端通过 fetch 读取 data: {...} 行，done 事件携带解析后的 JSON
+ */
+router.post('/generate/stream', async (req, res) => {
+  const taskType = 'resume_generate';
+  const model = getRequestedModel(req);
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+  const sendEvent = (payload) => {
+    res.write(`data: ${JSON.stringify(payload)}\n\n`);
+  };
+
+  try {
+    await ensureAiQuota(req, taskType);
+    const userInput = JSON.stringify(req.body || {});
+    const result = await aiService.generateResumeStream(userInput, { model }, (chunk) => {
+      sendEvent({ chunk });
+    });
+    if (!result || Object.keys(result).length === 0) {
+      await recordAiCall(req, taskType, model, false, 'AI生成简历失败，请重试');
+      sendEvent({ error: 'AI生成简历失败，请重试' });
+      return res.end();
+    }
+    await recordAiCall(req, taskType, model, true);
+    sendEvent({ done: true, data: result });
+    res.end();
+  } catch (e) {
+    if (e.code === 'AI_LIMIT_EXCEEDED') {
+      sendEvent({ error: e.message, code: 'AI_LIMIT_EXCEEDED' });
+      return res.end();
+    }
+    await recordAiCall(req, taskType, model, false, e.message);
+    if (e.code === 'CONFIG_MISSING') {
+      sendEvent({ error: e.message, code: 'CONFIG_MISSING' });
+      return res.end();
+    }
+    sendEvent({ error: `AI服务调用失败：${e.message}` });
+    res.end();
+  }
+});
+
+/**
  * AI优化项目描述接口
  */
 router.post('/optimize', async (req, res) => {
@@ -480,6 +525,86 @@ router.post('/export', async (req, res) => {
     return res.status(500).json({ detail: `记录失败：${error.message}` });
   }
   return res.json({ success: true, message: '导出记录已保存' });
+});
+
+/**
+ * 上传 PDF 并由 AI 流式优化（SSE）
+ */
+router.post('/uploadOptimize/stream', (req, res) => {
+  upload.single('file')(req, res, async (uploadErr) => {
+    const taskType = 'pdf_optimize';
+    const model = getRequestedModel(req);
+    if (uploadErr) {
+      return res.status(400).json({ detail: uploadErr.message || '文件上传失败' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ detail: '请上传 PDF 文件（字段名：file）' });
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+    const sendEvent = (payload) => {
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    const filePath = req.file.path;
+    const targetPosition = (req.body && req.body.target_position) || '';
+
+    try {
+      await ensureAiQuota(req, taskType);
+      const dataBuffer = fs.readFileSync(filePath);
+      const pdfData = await pdfParse(dataBuffer);
+      const pdfText = (pdfData.text || '').trim();
+
+      if (!pdfText) {
+        sendEvent({ error: 'PDF 内容为空或无法解析（可能是扫描版图片PDF）' });
+        return res.end();
+      }
+
+      sendEvent({ status: 'PDF 解析完成，AI 正在优化...' });
+      const truncated = pdfText.length > 8000 ? pdfText.slice(0, 8000) : pdfText;
+
+      const result = await aiService.optimizeFromPdfTextStream(
+        truncated,
+        targetPosition,
+        { model },
+        (chunk) => sendEvent({ chunk }),
+      );
+
+      if (!result || !result.resume || Object.keys(result.resume).length === 0) {
+        await recordAiCall(req, taskType, model, false, 'AI优化失败，请重试');
+        sendEvent({ error: 'AI优化失败，请重试' });
+        return res.end();
+      }
+
+      await recordAiCall(req, taskType, model, true);
+      sendEvent({
+        done: true,
+        data: {
+          resume: result.resume,
+          optimization_notes: result.optimization_notes || [],
+          file_name: req.file.originalname,
+          file_size: req.file.size,
+        },
+      });
+      res.end();
+    } catch (e) {
+      if (e.code === 'CONFIG_MISSING') {
+        sendEvent({ error: e.message, code: 'CONFIG_MISSING' });
+        return res.end();
+      }
+      if (e.code === 'AI_LIMIT_EXCEEDED') {
+        sendEvent({ error: e.message, code: 'AI_LIMIT_EXCEEDED' });
+        return res.end();
+      }
+      await recordAiCall(req, taskType, model, false, e.message);
+      sendEvent({ error: `处理失败：${e.message}` });
+      res.end();
+    }
+  });
 });
 
 /**
