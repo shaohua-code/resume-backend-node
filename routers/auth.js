@@ -15,6 +15,8 @@ const {
   verifyOtp,
   refreshSession,
   setPasswordAfterEmailVerified,
+  sendPasswordResetCode,
+  verifyResetCodeAndUpdatePassword,
   signInWithPassword,
   resolveLoginEmail,
   isUsernameTaken,
@@ -248,6 +250,76 @@ router.post(
       });
     } catch (e) {
       return res.status(401).json({ detail: e.message || '刷新令牌无效或已过期' });
+    }
+  },
+);
+
+/**
+ * 发送密码重置验证码接口
+ * 复用 Supabase OTP 能力，向已注册邮箱发送 6 位数字验证码
+ * 邮件内容由 Supabase Dashboard → Authentication → Templates → Magic Link 模板决定
+ */
+router.post(
+  '/resetPassword',
+  [body('email').isEmail().withMessage('邮箱格式不正确')],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ detail: errors.array()[0].msg });
+    }
+    const { email } = req.body;
+    try {
+      await sendPasswordResetCode(email);
+      return res.json({ success: true, message: '验证码已发送，请查收邮箱' });
+    } catch (e) {
+      const msg = e.message || '';
+      if (/rate limit/i.test(msg)) {
+        return res.status(429).json({ detail: '邮件发送频率超限，请稍后再试' });
+      }
+      if (/invalid.*email/i.test(msg)) {
+        return res.status(400).json({ detail: '邮箱格式不正确' });
+      }
+      // 对于未注册邮箱也返回成功，避免被枚举攻击
+      if (/user not found/i.test(msg)) {
+        return res.json({ success: true, message: '如果该邮箱已注册，验证码将很快送达' });
+      }
+      return res.status(500).json({ detail: `发送验证码失败：${msg}` });
+    }
+  },
+);
+
+/**
+ * 校验重置验证码并设置新密码接口
+ * 用户输入邮箱、验证码、新密码，后端校验 OTP 通过后更新密码
+ */
+router.post(
+  '/updatePassword',
+  [
+    body('email').isEmail().withMessage('邮箱格式不正确'),
+    body('code').isString().isLength({ min: 8, max: 8 }).withMessage('验证码为 8 位数字'),
+    body('password')
+      .isString()
+      .isLength({ min: 6, max: 72 })
+      .withMessage('密码长度需在 6-72 位之间'),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ detail: errors.array()[0].msg });
+    }
+    const { email, code, password } = req.body;
+    try {
+      await verifyResetCodeAndUpdatePassword(email, code, password);
+      return res.json({ success: true, message: '密码重置成功，请使用新密码登录' });
+    } catch (e) {
+      const msg = e.message || '';
+      if (e.statusCode === 400 || /token|otp|expired/i.test(msg)) {
+        return res.status(400).json({ detail: '验证码错误或已过期' });
+      }
+      if (/weak password/i.test(msg) || (/password/i.test(msg) && /short/i.test(msg))) {
+        return res.status(400).json({ detail: '密码强度不足，请使用更复杂的密码' });
+      }
+      return res.status(500).json({ detail: `重置密码失败：${msg}` });
     }
   },
 );

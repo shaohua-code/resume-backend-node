@@ -30,6 +30,9 @@ const settings = {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
+
+  // 应用前端地址，用于邮件重置密码链接回调
+  APP_FRONTEND_URL: process.env.APP_FRONTEND_URL || 'http://localhost:5173',
 };
 
 // 启动配置检查

@@ -96,6 +96,54 @@ async function setPasswordAfterEmailVerified(userId, password, username) {
 }
 
 /**
+ * 发送密码重置验证码（OTP）
+ * 复用 Supabase Magic Link 的 OTP 能力，但邮件模板只显示 6 位数字验证码
+ * 用户拿到验证码后在前端输入，完成身份校验再重置密码
+ *
+ * @param {string} email 用户邮箱
+ */
+async function sendPasswordResetCode(email) {
+  const { data, error } = await supabaseAuth.auth.signInWithOtp({
+    email,
+    options: {
+      shouldCreateUser: false, // 不自动注册，未注册邮箱不发送验证码
+    },
+  });
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * 校验重置验证码并更新密码
+ * 使用 verifyOtp 验证邮箱归属后，再用 admin 权限更新该用户密码
+ *
+ * @param {string} email 用户邮箱
+ * @param {string} code 6 位验证码
+ * @param {string} newPassword 新密码
+ */
+async function verifyResetCodeAndUpdatePassword(email, code, newPassword) {
+  // 先校验邮箱验证码，确认邮箱归属
+  const { data, error } = await supabaseAuth.auth.verifyOtp({
+    email,
+    token: code,
+    type: 'email',
+  });
+  if (error) {
+    const err = new Error('验证码错误或已过期');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // 校验通过后，使用 admin 权限更新密码
+  const { data: updateData, error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
+    data.user.id,
+    { password: newPassword }
+  );
+  if (updateError) throw updateError;
+  return updateData.user;
+}
+
+/**
  * 邮箱 + 密码登录
  * @returns {Promise<{user, session}>}
  */
@@ -150,6 +198,8 @@ module.exports = {
   refreshSession,
   updateUserMetadata,
   setPasswordAfterEmailVerified,
+  sendPasswordResetCode,
+  verifyResetCodeAndUpdatePassword,
   signInWithPassword,
   resolveLoginEmail,
   isUsernameTaken,
