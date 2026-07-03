@@ -24,6 +24,22 @@ function sanitizeKeyword(keyword) {
   return String(keyword || '').trim().replace(/[,%]/g, '');
 }
 
+// 批量附加用户昵称与邮箱，供列表展示
+async function attachUserProfiles(items, userIdKey = 'user_id') {
+  if (!items?.length) return items || []
+  const userIds = [...new Set(items.map((item) => item[userIdKey]).filter(Boolean))]
+  if (!userIds.length) return items
+  const { data: profiles } = await supabaseAdmin
+    .from('user_profile')
+    .select('user_id, nickname, email')
+    .in('user_id', userIds)
+  const profileMap = Object.fromEntries((profiles || []).map((p) => [p.user_id, p]))
+  return items.map((item) => ({
+    ...item,
+    user: profileMap[item[userIdKey]] || null,
+  }))
+}
+
 function applyAdminUserScope(query, req) {
   if (req.user.role === ROLES.ADMIN) {
     // 普通管理员只能管理普通用户和 VIP 用户，不能读取管理员列表。
@@ -305,7 +321,8 @@ router.get('/orders', requirePermission(PERMISSIONS.ADMIN_VIEW_ORDERS), async (r
   if (req.query.user_id) query = query.eq('user_id', req.query.user_id);
   const { data, error, count } = await query;
   if (error) return res.status(500).json({ detail: `查询订单失败：${error.message}` });
-  return res.json({ success: true, total: count || 0, items: data || [] });
+  const items = await attachUserProfiles(data || []);
+  return res.json({ success: true, total: count || 0, items });
 });
 
 router.post('/orders', requirePermission(PERMISSIONS.ADMIN_MANAGE_ORDERS), async (req, res) => {
@@ -354,7 +371,8 @@ router.get('/ai-calls', requirePermission(PERMISSIONS.ADMIN_VIEW_AI_CALLS), asyn
   if (req.query.task_type) query = query.eq('task_type', req.query.task_type);
   const { data, error, count } = await query;
   if (error) return res.status(500).json({ detail: `查询AI调用失败：${error.message}` });
-  return res.json({ success: true, total: count || 0, items: data || [] });
+  const items = await attachUserProfiles(data || []);
+  return res.json({ success: true, total: count || 0, items });
 });
 
 router.get('/resumes', requirePermission(PERMISSIONS.ADMIN_VIEW_RESUMES), async (req, res) => {
@@ -367,7 +385,8 @@ router.get('/resumes', requirePermission(PERMISSIONS.ADMIN_VIEW_RESUMES), async 
   if (req.query.user_id) query = query.eq('user_id', req.query.user_id);
   const { data, error, count } = await query;
   if (error) return res.status(500).json({ detail: `查询简历失败：${error.message}` });
-  return res.json({ success: true, total: count || 0, items: data || [] });
+  const items = await attachUserProfiles(data || []);
+  return res.json({ success: true, total: count || 0, items });
 });
 
 router.get('/resumes/:id', requirePermission(PERMISSIONS.ADMIN_VIEW_RESUMES), async (req, res) => {

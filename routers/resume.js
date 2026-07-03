@@ -681,6 +681,142 @@ router.post('/uploadOptimize', (req, res) => {
 });
 
 /**
+ * 使用已上传的 PDF 进行 AI 流式优化（无需重新上传）
+ */
+router.post('/uploadOptimize/existing/stream', async (req, res) => {
+  const taskType = 'pdf_optimize';
+  const model = getRequestedModel(req);
+  const userId = req.user.id;
+  const filePath = path.join(UPLOAD_DIR, `${userId}.pdf`);
+
+  if (!fs.existsSync(filePath)) {
+    return res.status(400).json({ detail: '暂无已上传的简历，请先上传 PDF' });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+  const sendEvent = (payload) => {
+    res.write(`data: ${JSON.stringify(payload)}\n\n`);
+  };
+
+  const targetPosition = (req.body && req.body.target_position) || '';
+
+  try {
+    await ensureAiQuota(req, taskType);
+    const dataBuffer = fs.readFileSync(filePath);
+    const pdfData = await pdfParse(dataBuffer);
+    const pdfText = (pdfData.text || '').trim();
+
+    if (!pdfText) {
+      sendEvent({ error: 'PDF 内容为空或无法解析（可能是扫描版图片PDF）' });
+      return res.end();
+    }
+
+    sendEvent({ status: '读取已上传简历，AI 正在优化...' });
+    const truncated = pdfText.length > 8000 ? pdfText.slice(0, 8000) : pdfText;
+
+    const result = await aiService.optimizeFromPdfTextStream(
+      truncated,
+      targetPosition,
+      { model },
+      (chunk) => sendEvent({ chunk }),
+    );
+
+    if (!result || !result.resume || Object.keys(result.resume).length === 0) {
+      await recordAiCall(req, taskType, model, false, 'AI优化失败，请重试');
+      sendEvent({ error: 'AI优化失败，请重试' });
+      return res.end();
+    }
+
+    const stat = fs.statSync(filePath);
+    await recordAiCall(req, taskType, model, true);
+    sendEvent({
+      done: true,
+      data: {
+        resume: result.resume,
+        optimization_notes: result.optimization_notes || [],
+        file_name: `${userId}.pdf`,
+        file_size: stat.size,
+      },
+    });
+    res.end();
+  } catch (e) {
+    if (e.code === 'CONFIG_MISSING') {
+      sendEvent({ error: e.message, code: 'CONFIG_MISSING' });
+      return res.end();
+    }
+    if (e.code === 'AI_LIMIT_EXCEEDED') {
+      sendEvent({ error: e.message, code: 'AI_LIMIT_EXCEEDED' });
+      return res.end();
+    }
+    await recordAiCall(req, taskType, model, false, e.message);
+    sendEvent({ error: `处理失败：${e.message}` });
+    res.end();
+  }
+});
+
+/**
+ * 使用已上传的 PDF 进行 AI 同步优化
+ */
+router.post('/uploadOptimize/existing', async (req, res) => {
+  const taskType = 'pdf_optimize';
+  const model = getRequestedModel(req);
+  const userId = req.user.id;
+  const filePath = path.join(UPLOAD_DIR, `${userId}.pdf`);
+
+  if (!fs.existsSync(filePath)) {
+    return res.status(400).json({ detail: '暂无已上传的简历，请先上传 PDF' });
+  }
+
+  const targetPosition = (req.body && req.body.target_position) || '';
+
+  try {
+    await ensureAiQuota(req, taskType);
+    const dataBuffer = fs.readFileSync(filePath);
+    const pdfData = await pdfParse(dataBuffer);
+    const pdfText = (pdfData.text || '').trim();
+
+    if (!pdfText) {
+      return res.status(400).json({ detail: 'PDF 内容为空或无法解析（可能是扫描版图片PDF）' });
+    }
+
+    const truncated = pdfText.length > 8000 ? pdfText.slice(0, 8000) : pdfText;
+    const result = await aiService.optimizeFromPdfText(truncated, targetPosition, { model });
+
+    if (!result || !result.resume || Object.keys(result.resume).length === 0) {
+      await recordAiCall(req, taskType, model, false, 'AI优化失败，请重试');
+      return res.status(500).json({ detail: 'AI优化失败，请重试' });
+    }
+
+    const stat = fs.statSync(filePath);
+    await recordAiCall(req, taskType, model, true);
+    return res.json({
+      success: true,
+      data: {
+        resume: result.resume,
+        optimization_notes: result.optimization_notes || [],
+        file_name: `${userId}.pdf`,
+        file_size: stat.size,
+      },
+      message: '简历优化完成',
+    });
+  } catch (e) {
+    if (e.code === 'CONFIG_MISSING') {
+      return res.status(400).json({ detail: e.message });
+    }
+    if (e.code === 'AI_LIMIT_EXCEEDED') {
+      return res.status(403).json({ detail: e.message });
+    }
+    await recordAiCall(req, taskType, model, false, e.message);
+    console.error('[uploadOptimize/existing] error:', e);
+    return res.status(500).json({ detail: `处理失败：${e.message}` });
+  }
+});
+
+/**
  * 获取当前用户已上传的 PDF 元信息
  * 路径：GET /api/resume/uploadedFile
  */
