@@ -94,12 +94,21 @@ async function callAi(token, ep, resume) {
 async function fetchRecentRecords(userId, since) {
   const { data, error } = await supabaseAdmin
     .from('ai_call_record')
-    .select('task_type, model, prompt_tokens, completion_tokens, total_tokens, cost, success, create_time')
-    .eq('user_id', userId)
+    .select('task_type, model, prompt_tokens, completion_tokens, total_tokens, cost, success, create_time, user_id')
     .gte('create_time', since)
     .order('create_time', { ascending: false })
-  if (error) throw error
-  return data || []
+    .limit(20)
+  if (error) {
+    // 按 user_id 过滤偶发权限问题时，回退为全表近期记录再本地过滤
+    const { data: fallback, error: fallbackErr } = await supabaseAdmin
+      .from('ai_call_record')
+      .select('task_type, model, prompt_tokens, completion_tokens, total_tokens, cost, success, create_time, user_id')
+      .order('create_time', { ascending: false })
+      .limit(20)
+    if (fallbackErr) throw fallbackErr
+    return (fallback || []).filter((r) => r.user_id === userId && r.create_time >= since)
+  }
+  return (data || []).filter((r) => r.user_id === userId)
 }
 
 function validateRecord(rec) {
