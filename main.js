@@ -15,7 +15,7 @@ const app = express();
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
-
+console.log(settings.CORS_ORIGINS);
 app.use(
   cors({
     origin: settings.CORS_ORIGINS,
