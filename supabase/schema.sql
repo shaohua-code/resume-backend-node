@@ -118,6 +118,10 @@ create table if not exists public.ai_call_record (
   user_id uuid references auth.users(id) on delete set null,
   task_type text not null,
   model text default '',
+  prompt_tokens int default 0,
+  completion_tokens int default 0,
+  total_tokens int default 0,
+  cost numeric(10, 6) default 0,
   success boolean default true,
   error_message text default '',
   create_time timestamptz default now()
@@ -148,6 +152,8 @@ create table if not exists public.ai_model (
   name text not null,
   model_key text unique not null,
   task_type text default 'all',
+  input_price_per_million numeric(10, 4) default 0,
+  output_price_per_million numeric(10, 4) default 0,
   vip_only boolean default false,
   enabled boolean default true,
   create_time timestamptz default now(),
@@ -177,10 +183,10 @@ values
   ('ai_daily_limit', '{"USER": 3, "VIP": -1}'::jsonb, '普通用户每日每类AI调用次数，-1表示不限次数')
 on conflict (config_key) do nothing;
 
-insert into public.ai_model (name, model_key, task_type, vip_only, enabled)
+insert into public.ai_model (name, model_key, task_type, input_price_per_million, output_price_per_million, vip_only, enabled)
 values
-  ('DeepSeek 默认模型', 'deepseek-v4-flash', 'all', false, true),
-  ('DeepSeek 高级模型', 'deepseek-chat', 'all', true, true)
+  ('DeepSeek 默认模型', 'deepseek-v4-flash', 'all', 0.5, 2.0, false, true),
+  ('DeepSeek 高级模型', 'deepseek-chat', 'all', 2.0, 8.0, true, true)
 on conflict (model_key) do nothing;
 
 -- 给 service_role 授权，后端使用 service_role 统一访问这些业务表

@@ -58,16 +58,25 @@ async function ensureAiQuota(req, taskType) {
   }
 }
 
-async function recordAiCall(req, taskType, model, success, errorMessage = '') {
+async function recordAiCall(req, taskType, model, success, errorMessage = '', meta = null) {
   // AI调用日志用于次数限制、后台审计和数据统计，失败也记录便于排查。
-  await supabaseAdmin.from('ai_call_record').insert({
+  const usage = meta?.usage || {};
+  const { error } = await supabaseAdmin.from('ai_call_record').insert({
     user_id: req.user.id,
     task_type: taskType,
-    model: model || '',
+    model: meta?.model || model || '',
+    prompt_tokens: usage.prompt_tokens || 0,
+    completion_tokens: usage.completion_tokens || 0,
+    total_tokens: usage.total_tokens || 0,
+    cost: meta?.cost || 0,
     success,
     error_message: errorMessage,
     create_time: new Date().toISOString(),
   });
+  // insert 失败时打日志，避免 token/cost 静默丢失
+  if (error) {
+    console.error('[recordAiCall]', error.message, { taskType, meta });
+  }
 }
 
 // 上传文件目录：每个用户只保留一份PDF简历
@@ -110,12 +119,16 @@ router.post('/generate', async (req, res) => {
   try {
     await ensureAiQuota(req, taskType);
     const userInput = JSON.stringify(req.body || {});
-    const result = await aiService.generateResume(userInput, { model });
+    let callMeta = null;
+    const result = await aiService.generateResume(userInput, {
+      model,
+      onCallMeta: (meta) => { callMeta = meta; },
+    });
     if (!result || Object.keys(result).length === 0) {
       await recordAiCall(req, taskType, model, false, 'AI生成简历失败，请重试');
       return res.status(500).json({ detail: 'AI生成简历失败，请重试' });
     }
-    await recordAiCall(req, taskType, model, true);
+    await recordAiCall(req, taskType, model, true, '', callMeta);
     return res.json({ success: true, data: result });
   } catch (e) {
     if (e.code === 'AI_LIMIT_EXCEEDED') {
@@ -148,7 +161,11 @@ router.post('/generate/stream', async (req, res) => {
   try {
     await ensureAiQuota(req, taskType);
     const userInput = JSON.stringify(req.body || {});
-    const result = await aiService.generateResumeStream(userInput, { model }, (chunk) => {
+    let callMeta = null;
+    const result = await aiService.generateResumeStream(userInput, {
+      model,
+      onCallMeta: (meta) => { callMeta = meta; },
+    }, (chunk) => {
       sendEvent({ chunk });
     });
     if (!result || Object.keys(result).length === 0) {
@@ -156,7 +173,7 @@ router.post('/generate/stream', async (req, res) => {
       sendEvent({ error: 'AI生成简历失败，请重试' });
       return res.end();
     }
-    await recordAiCall(req, taskType, model, true);
+    await recordAiCall(req, taskType, model, true, '', callMeta);
     sendEvent({ done: true, data: result });
     res.end();
   } catch (e) {
@@ -186,12 +203,16 @@ router.post('/optimize', async (req, res) => {
     if (!project_description) {
       return res.status(400).json({ detail: 'project_description 不能为空' });
     }
-    const result = await aiService.optimizeProject(project_description, target_position || '', { model });
+    let callMeta = null;
+    const result = await aiService.optimizeProject(project_description, target_position || '', {
+      model,
+      onCallMeta: (meta) => { callMeta = meta; },
+    });
     if (!result || Object.keys(result).length === 0) {
       await recordAiCall(req, taskType, model, false, 'AI优化失败，请重试');
       return res.status(500).json({ detail: 'AI优化失败，请重试' });
     }
-    await recordAiCall(req, taskType, model, true);
+    await recordAiCall(req, taskType, model, true, '', callMeta);
     return res.json({ success: true, data: result });
   } catch (e) {
     if (e.code === 'AI_LIMIT_EXCEEDED') {
@@ -223,8 +244,12 @@ router.post('/match', async (req, res) => {
     if (error || !resume) {
       return res.status(404).json({ detail: '简历不存在' });
     }
-    const matchData = await aiService.matchJd(resume.resume_json, jd_text || '', { model });
-    await recordAiCall(req, taskType, model, true);
+    let callMeta = null;
+    const matchData = await aiService.matchJd(resume.resume_json, jd_text || '', {
+      model,
+      onCallMeta: (meta) => { callMeta = meta; },
+    });
+    await recordAiCall(req, taskType, model, true, '', callMeta);
     return res.json({ success: true, data: matchData, message: '匹配分析完成' });
   } catch (e) {
     if (e.code === 'AI_LIMIT_EXCEEDED') {
@@ -253,8 +278,12 @@ router.post('/score', async (req, res) => {
     if (error || !resume) {
       return res.status(404).json({ detail: '简历不存在' });
     }
-    const scoreData = await aiService.scoreResume(resume.resume_json, { model });
-    await recordAiCall(req, taskType, model, true);
+    let callMeta = null;
+    const scoreData = await aiService.scoreResume(resume.resume_json, {
+      model,
+      onCallMeta: (meta) => { callMeta = meta; },
+    });
+    await recordAiCall(req, taskType, model, true, '', callMeta);
     return res.json({ success: true, data: scoreData, message: '评分完成' });
   } catch (e) {
     if (e.code === 'AI_LIMIT_EXCEEDED') {
@@ -567,10 +596,14 @@ router.post('/uploadOptimize/stream', (req, res) => {
       sendEvent({ status: 'PDF 解析完成，AI 正在优化...' });
       const truncated = pdfText.length > 8000 ? pdfText.slice(0, 8000) : pdfText;
 
+      let callMeta = null;
       const result = await aiService.optimizeFromPdfTextStream(
         truncated,
         targetPosition,
-        { model },
+        {
+          model,
+          onCallMeta: (meta) => { callMeta = meta; },
+        },
         (chunk) => sendEvent({ chunk }),
       );
 
@@ -580,7 +613,7 @@ router.post('/uploadOptimize/stream', (req, res) => {
         return res.end();
       }
 
-      await recordAiCall(req, taskType, model, true);
+      await recordAiCall(req, taskType, model, true, '', callMeta);
       sendEvent({
         done: true,
         data: {
@@ -648,14 +681,18 @@ router.post('/uploadOptimize', (req, res) => {
       const truncated = pdfText.length > 8000 ? pdfText.slice(0, 8000) : pdfText;
 
       // 2. 调用 AI 整体优化
-      const result = await aiService.optimizeFromPdfText(truncated, targetPosition, { model });
+      let callMeta = null;
+      const result = await aiService.optimizeFromPdfText(truncated, targetPosition, {
+        model,
+        onCallMeta: (meta) => { callMeta = meta; },
+      });
 
       if (!result || !result.resume || Object.keys(result.resume).length === 0) {
         await recordAiCall(req, taskType, model, false, 'AI优化失败，请重试');
         return res.status(500).json({ detail: 'AI优化失败，请重试' });
       }
 
-      await recordAiCall(req, taskType, model, true);
+      await recordAiCall(req, taskType, model, true, '', callMeta);
       return res.json({
         success: true,
         data: {
@@ -718,10 +755,14 @@ router.post('/uploadOptimize/existing/stream', async (req, res) => {
     sendEvent({ status: '读取已上传简历，AI 正在优化...' });
     const truncated = pdfText.length > 8000 ? pdfText.slice(0, 8000) : pdfText;
 
+    let callMeta = null;
     const result = await aiService.optimizeFromPdfTextStream(
       truncated,
       targetPosition,
-      { model },
+      {
+        model,
+        onCallMeta: (meta) => { callMeta = meta; },
+      },
       (chunk) => sendEvent({ chunk }),
     );
 
@@ -732,7 +773,7 @@ router.post('/uploadOptimize/existing/stream', async (req, res) => {
     }
 
     const stat = fs.statSync(filePath);
-    await recordAiCall(req, taskType, model, true);
+    await recordAiCall(req, taskType, model, true, '', callMeta);
     sendEvent({
       done: true,
       data: {
@@ -784,7 +825,11 @@ router.post('/uploadOptimize/existing', async (req, res) => {
     }
 
     const truncated = pdfText.length > 8000 ? pdfText.slice(0, 8000) : pdfText;
-    const result = await aiService.optimizeFromPdfText(truncated, targetPosition, { model });
+    let callMeta = null;
+    const result = await aiService.optimizeFromPdfText(truncated, targetPosition, {
+      model,
+      onCallMeta: (meta) => { callMeta = meta; },
+    });
 
     if (!result || !result.resume || Object.keys(result.resume).length === 0) {
       await recordAiCall(req, taskType, model, false, 'AI优化失败，请重试');
@@ -792,7 +837,7 @@ router.post('/uploadOptimize/existing', async (req, res) => {
     }
 
     const stat = fs.statSync(filePath);
-    await recordAiCall(req, taskType, model, true);
+    await recordAiCall(req, taskType, model, true, '', callMeta);
     return res.json({
       success: true,
       data: {

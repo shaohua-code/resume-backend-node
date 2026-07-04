@@ -9,6 +9,7 @@
 
 const axios = require('axios');
 const { settings } = require('../config');
+const { calcAiCost, normalizeUsage } = require('../utils/ai_cost');
 
 const AI_TASK = {
   RESUME_GENERATE: 'resume_generate',
@@ -158,14 +159,32 @@ function format(tpl, vars) {
   return tpl.replace(/\{(\w+)\}/g, (_, key) => (vars[key] !== undefined ? String(vars[key]) : ''));
 }
 
+// 调用完成后通过回调上报 model、usage、cost，供 recordAiCall 写入审计表
+async function notifyCallMeta(options, model, usage, responseModel) {
+  if (typeof options.onCallMeta !== 'function') {
+    return;
+  }
+  const normalizedUsage = normalizeUsage(usage);
+  // 优先使用 API 响应中的实际模型名，避免与 ai_model 表 key 不一致导致费用为 0
+  const resolvedModel = (responseModel && String(responseModel).trim()) || model;
+  let cost = 0;
+  try {
+    cost = await calcAiCost(resolvedModel, normalizedUsage);
+  } catch (e) {
+    console.error('[notifyCallMeta] calcAiCost failed:', e.message, { model: resolvedModel, usage: normalizedUsage });
+  }
+  options.onCallMeta({
+    model: resolvedModel,
+    usage: normalizedUsage,
+    cost,
+  });
+}
+
 /**
- * 调用 DeepSeek API 的通用方法（流式）
- * @param {string} prompt 发送给AI的完整提示词
- * @param {object} options 调用配置
- * @param {(chunk: string) => void} onChunk 每收到一段文本时的回调
- * @returns {Promise<string>} AI 生成的完整文本
+ * 调用 DeepSeek API 的通用方法（非流式）
+ * @returns {Promise<{ content: string, usage: object, model: string }>}
  */
-async function callDeepseekStream(prompt, options = {}, onChunk) {
+async function callDeepseek(prompt, options = {}) {
   if (!settings.DEEPSEEK_API_KEY || !settings.DEEPSEEK_API_KEY.trim()) {
     const err = new Error(
       'DeepSeek API Key 未配置！请在 .env 文件中设置 DEEPSEEK_API_KEY=你的密钥。' +
@@ -184,83 +203,23 @@ async function callDeepseekStream(prompt, options = {}, onChunk) {
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.7,
     max_tokens: 4096,
-    stream: true,
-  };
-  const response = await axios.post(settings.DEEPSEEK_API_URL, payload, {
-    headers,
-    responseType: 'stream',
-    timeout: 120000,
-  });
-
-  let fullText = '';
-  let buffer = '';
-
-  await new Promise((resolve, reject) => {
-    response.data.on('data', (chunk) => {
-      buffer += chunk.toString();
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) continue;
-        const dataStr = trimmed.slice(5).trim();
-        if (dataStr === '[DONE]') continue;
-        try {
-          const parsed = JSON.parse(dataStr);
-          const delta = parsed.choices?.[0]?.delta?.content || '';
-          if (delta) {
-            fullText += delta;
-            if (typeof onChunk === 'function') onChunk(delta);
-          }
-        } catch (e) {
-          /* ignore partial json */
-        }
-      }
-    });
-    response.data.on('end', resolve);
-    response.data.on('error', reject);
-  });
-
-  return fullText;
-}
-
-/**
- * 调用 DeepSeek API 的通用方法（非流式）
- * @param {string} prompt 发送给AI的完整提示词
- * @param {object} options 调用配置，支持按业务动态传入模型
- * @returns {Promise<string>} AI生成的文本内容
- */
-async function callDeepseek(prompt, options = {}) {
-  // 校验 API Key 是否配置，未配置则抛出友好错误提示
-  if (!settings.DEEPSEEK_API_KEY || !settings.DEEPSEEK_API_KEY.trim()) {
-    const err = new Error(
-      'DeepSeek API Key 未配置！请在 .env 文件中设置 DEEPSEEK_API_KEY=你的密钥。' +
-        '获取地址：https://platform.deepseek.com/api_keys',
-    );
-    err.code = 'CONFIG_MISSING';
-    throw err;
-  }
-  const headers = {
-    Authorization: `Bearer ${settings.DEEPSEEK_API_KEY.trim()}`,
-    'Content-Type': 'application/json',
-  };
-  const model = resolveModel(options.task, options.model);
-  const payload = {
-    model,
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.7, // 创造性参数，0.7平衡创意与准确性
-    max_tokens: 4096, // 最大生成token数
   };
   const response = await axios.post(settings.DEEPSEEK_API_URL, payload, {
     headers,
     timeout: 60000,
   });
-  return response.data.choices[0].message.content;
+  // 读取 API 返回的实际模型名，用于费用计算与审计记录
+  const responseModel = response.data.model || model;
+  return {
+    content: response.data.choices[0].message.content,
+    usage: response.data.usage || {},
+    model: responseModel,
+  };
 }
 
 /**
  * 流式调用 DeepSeek API - 通过 onChunk 回调推送增量文本
- * @returns {Promise<string>} 完整生成文本
+ * @returns {Promise<{ content: string, usage: object, model: string }>}
  */
 async function callDeepseekStream(prompt, options = {}, onChunk) {
   if (!settings.DEEPSEEK_API_KEY || !settings.DEEPSEEK_API_KEY.trim()) {
@@ -282,6 +241,7 @@ async function callDeepseekStream(prompt, options = {}, onChunk) {
     temperature: 0.7,
     max_tokens: 4096,
     stream: true,
+    stream_options: { include_usage: true },
   };
   const response = await axios.post(settings.DEEPSEEK_API_URL, payload, {
     headers,
@@ -292,6 +252,8 @@ async function callDeepseekStream(prompt, options = {}, onChunk) {
   return new Promise((resolve, reject) => {
     let full = '';
     let remainder = '';
+    let usage = {};
+    let responseModel = '';
 
     response.data.on('data', (chunk) => {
       remainder += chunk.toString();
@@ -304,6 +266,12 @@ async function callDeepseekStream(prompt, options = {}, onChunk) {
         if (data === '[DONE]') continue;
         try {
           const parsed = JSON.parse(data);
+          if (parsed.model) {
+            responseModel = parsed.model;
+          }
+          if (parsed.usage) {
+            usage = parsed.usage;
+          }
           const content = parsed.choices?.[0]?.delta?.content || '';
           if (content) {
             full += content;
@@ -315,7 +283,11 @@ async function callDeepseekStream(prompt, options = {}, onChunk) {
       }
     });
 
-    response.data.on('end', () => resolve(full));
+    response.data.on('end', () => resolve({
+      content: full,
+      usage,
+      model: responseModel || model,
+    }));
     response.data.on('error', reject);
   });
 }
@@ -419,8 +391,9 @@ function hasResumeContent(resume) {
  */
 async function generateResume(userInput, options = {}) {
   const prompt = format(RESUME_GENERATE_PROMPT, { user_input: userInput });
-  const result = await callDeepseek(prompt, { task: AI_TASK.RESUME_GENERATE, model: options.model });
-  return extractJson(result);
+  const { content, usage, model } = await callDeepseek(prompt, { task: AI_TASK.RESUME_GENERATE, model: options.model });
+  await notifyCallMeta(options, model, usage);
+  return extractJson(content);
 }
 
 /**
@@ -428,12 +401,13 @@ async function generateResume(userInput, options = {}) {
  */
 async function generateResumeStream(userInput, options = {}, onChunk) {
   const prompt = format(RESUME_GENERATE_PROMPT, { user_input: userInput });
-  const result = await callDeepseekStream(
+  const { content, usage, model } = await callDeepseekStream(
     prompt,
     { task: AI_TASK.RESUME_GENERATE, model: options.model },
     onChunk,
   );
-  return extractJson(result);
+  await notifyCallMeta(options, model, usage);
+  return extractJson(content);
 }
 
 /**
@@ -445,8 +419,9 @@ async function optimizeProject(projectDescription, targetPosition = '', options 
     project_description: projectDescription,
     target_position: targetPosition || '通用技术岗位',
   });
-  const result = await callDeepseek(prompt, { task: AI_TASK.PROJECT_OPTIMIZE, model: options.model });
-  return extractJson(result);
+  const { content, usage, model } = await callDeepseek(prompt, { task: AI_TASK.PROJECT_OPTIMIZE, model: options.model });
+  await notifyCallMeta(options, model, usage);
+  return extractJson(content);
 }
 
 /**
@@ -455,8 +430,9 @@ async function optimizeProject(projectDescription, targetPosition = '', options 
  */
 async function matchJd(resumeContent, jdText, options = {}) {
   const prompt = format(JD_MATCH_PROMPT, { resume_content: resumeContent, jd_text: jdText });
-  const result = await callDeepseek(prompt, { task: AI_TASK.JD_MATCH, model: options.model });
-  const data = extractJson(result);
+  const { content, usage, model } = await callDeepseek(prompt, { task: AI_TASK.JD_MATCH, model: options.model });
+  await notifyCallMeta(options, model, usage);
+  const data = extractJson(content);
   return {
     match_score: data.match_score || 0,
     keywords: data.keywords || [],
@@ -471,8 +447,9 @@ async function matchJd(resumeContent, jdText, options = {}) {
  */
 async function scoreResume(resumeContent, options = {}) {
   const prompt = format(SCORE_PROMPT, { resume_content: resumeContent });
-  const result = await callDeepseek(prompt, { task: AI_TASK.SCORE, model: options.model });
-  const data = extractJson(result);
+  const { content, usage, model } = await callDeepseek(prompt, { task: AI_TASK.SCORE, model: options.model });
+  await notifyCallMeta(options, model, usage);
+  const data = extractJson(content);
   return {
     content_completeness: data.content_completeness || 0,
     skill_match: data.skill_match || 0,
@@ -494,8 +471,9 @@ async function optimizeFromPdfText(pdfText, targetPosition = '', options = {}) {
     pdf_text: pdfText,
     target_position: targetPosition || '通用职业方向',
   });
-  const result = await callDeepseek(prompt, { task: AI_TASK.PDF_OPTIMIZE, model: options.model });
-  const data = extractJson(result);
+  const { content, usage, model } = await callDeepseek(prompt, { task: AI_TASK.PDF_OPTIMIZE, model: options.model });
+  await notifyCallMeta(options, model, usage);
+  const data = extractJson(content);
   if (!data || Object.keys(data).length === 0) {
     return { resume: {}, optimization_notes: [] };
   }
@@ -514,12 +492,13 @@ async function optimizeFromPdfTextStream(pdfText, targetPosition = '', options =
     pdf_text: pdfText,
     target_position: targetPosition || '通用职业方向',
   });
-  const result = await callDeepseekStream(
+  const { content, usage, model } = await callDeepseekStream(
     prompt,
     { task: AI_TASK.PDF_OPTIMIZE, model: options.model },
     onChunk,
   );
-  const data = extractJson(result);
+  await notifyCallMeta(options, model, usage);
+  const data = extractJson(content);
   if (!data || Object.keys(data).length === 0) {
     return { resume: {}, optimization_notes: [] };
   }
