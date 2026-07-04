@@ -5,12 +5,6 @@
 
 const { supabaseAdmin } = require('../supabaseClient');
 
-// 内置默认定价（元/百万 token），ai_model 表查不到时使用
-const DEFAULT_MODEL_PRICING = {
-  'deepseek-v4-flash': { input: 0.5, output: 2.0 },
-  'deepseek-chat': { input: 2.0, output: 8.0 },
-};
-
 function normalizeUsage(usage = {}) {
   const promptTokens = Number(usage.prompt_tokens) || 0;
   const completionTokens = Number(usage.completion_tokens) || 0;
@@ -23,10 +17,10 @@ function normalizeUsage(usage = {}) {
 }
 
 /**
- * 按 model_key 查询单价并计算费用
- * @param {string} modelKey 实际使用的模型 key
+ * 按 model_key 查询 ai_model 表单价并计算费用
+ * @param {string} modelKey 模型 key（与后台 AI模型管理 model_key 一致）
  * @param {object} usage token 用量
- * @returns {Promise<number>} 费用（元），保留 6 位小数精度
+ * @returns {Promise<number>} 费用（元），未配置单价时返回 0
  */
 async function calcAiCost(modelKey, usage = {}) {
   const normalized = normalizeUsage(usage);
@@ -40,17 +34,10 @@ async function calcAiCost(modelKey, usage = {}) {
     .eq('model_key', modelKey)
     .maybeSingle();
 
-  let inputPrice = Number(data?.input_price_per_million) || 0;
-  let outputPrice = Number(data?.output_price_per_million) || 0;
-  // 表中无单价时回退到内置默认定价，避免费用恒为 0
+  const inputPrice = Number(data?.input_price_per_million) || 0;
+  const outputPrice = Number(data?.output_price_per_million) || 0;
   if (!inputPrice && !outputPrice) {
-    const fallback = DEFAULT_MODEL_PRICING[modelKey];
-    if (fallback) {
-      inputPrice = fallback.input;
-      outputPrice = fallback.output;
-    } else {
-      return 0;
-    }
+    return 0;
   }
 
   const cost =

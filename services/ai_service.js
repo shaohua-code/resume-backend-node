@@ -159,30 +159,16 @@ function format(tpl, vars) {
   return tpl.replace(/\{(\w+)\}/g, (_, key) => (vars[key] !== undefined ? String(vars[key]) : ''));
 }
 
-// 调用完成后通过回调上报 model、usage、cost，供 recordAiCall 写入审计表
-async function notifyCallMeta(options, model, usage, responseModel) {
-  if (typeof options.onCallMeta !== 'function') {
-    return;
-  }
+// 组装调用元信息，供 recordAiCall 写入审计表
+async function buildMeta(model, usage) {
   const normalizedUsage = normalizeUsage(usage);
-  // 优先使用 API 响应中的实际模型名，避免与 ai_model 表 key 不一致导致费用为 0
-  const resolvedModel = (responseModel && String(responseModel).trim()) || model;
-  let cost = 0;
-  try {
-    cost = await calcAiCost(resolvedModel, normalizedUsage);
-  } catch (e) {
-    console.error('[notifyCallMeta] calcAiCost failed:', e.message, { model: resolvedModel, usage: normalizedUsage });
-  }
-  options.onCallMeta({
-    model: resolvedModel,
-    usage: normalizedUsage,
-    cost,
-  });
+  const cost = await calcAiCost(model, normalizedUsage);
+  return { model, usage: normalizedUsage, cost };
 }
 
 /**
  * 调用 DeepSeek API 的通用方法（非流式）
- * @returns {Promise<{ content: string, usage: object, model: string }>}
+ * @returns {Promise<{ content: string, usage: object, model: string, cost: number }>}
  */
 async function callDeepseek(prompt, options = {}) {
   if (!settings.DEEPSEEK_API_KEY || !settings.DEEPSEEK_API_KEY.trim()) {
@@ -208,18 +194,19 @@ async function callDeepseek(prompt, options = {}) {
     headers,
     timeout: 60000,
   });
-  // 读取 API 返回的实际模型名，用于费用计算与审计记录
-  const responseModel = response.data.model || model;
+  const usage = normalizeUsage(response.data.usage || {});
+  const cost = await calcAiCost(model, usage);
   return {
     content: response.data.choices[0].message.content,
-    usage: response.data.usage || {},
-    model: responseModel,
+    usage,
+    model,
+    cost,
   };
 }
 
 /**
  * 流式调用 DeepSeek API - 通过 onChunk 回调推送增量文本
- * @returns {Promise<{ content: string, usage: object, model: string }>}
+ * @returns {Promise<{ content: string, usage: object, model: string, cost: number }>}
  */
 async function callDeepseekStream(prompt, options = {}, onChunk) {
   if (!settings.DEEPSEEK_API_KEY || !settings.DEEPSEEK_API_KEY.trim()) {
@@ -253,7 +240,6 @@ async function callDeepseekStream(prompt, options = {}, onChunk) {
     let full = '';
     let remainder = '';
     let usage = {};
-    let responseModel = '';
 
     response.data.on('data', (chunk) => {
       remainder += chunk.toString();
@@ -266,9 +252,6 @@ async function callDeepseekStream(prompt, options = {}, onChunk) {
         if (data === '[DONE]') continue;
         try {
           const parsed = JSON.parse(data);
-          if (parsed.model) {
-            responseModel = parsed.model;
-          }
           if (parsed.usage) {
             usage = parsed.usage;
           }
@@ -283,11 +266,10 @@ async function callDeepseekStream(prompt, options = {}, onChunk) {
       }
     });
 
-    response.data.on('end', () => resolve({
-      content: full,
-      usage,
-      model: responseModel || model,
-    }));
+    response.data.on('end', async () => {
+      const meta = await buildMeta(model, usage);
+      resolve({ content: full, ...meta });
+    });
     response.data.on('error', reject);
   });
 }
@@ -391,9 +373,8 @@ function hasResumeContent(resume) {
  */
 async function generateResume(userInput, options = {}) {
   const prompt = format(RESUME_GENERATE_PROMPT, { user_input: userInput });
-  const { content, usage, model } = await callDeepseek(prompt, { task: AI_TASK.RESUME_GENERATE, model: options.model });
-  await notifyCallMeta(options, model, usage);
-  return extractJson(content);
+  const { content, usage, model, cost } = await callDeepseek(prompt, { task: AI_TASK.RESUME_GENERATE, model: options.model });
+  return { data: extractJson(content), meta: { model, usage, cost } };
 }
 
 /**
@@ -401,13 +382,12 @@ async function generateResume(userInput, options = {}) {
  */
 async function generateResumeStream(userInput, options = {}, onChunk) {
   const prompt = format(RESUME_GENERATE_PROMPT, { user_input: userInput });
-  const { content, usage, model } = await callDeepseekStream(
+  const { content, usage, model, cost } = await callDeepseekStream(
     prompt,
     { task: AI_TASK.RESUME_GENERATE, model: options.model },
     onChunk,
   );
-  await notifyCallMeta(options, model, usage);
-  return extractJson(content);
+  return { data: extractJson(content), meta: { model, usage, cost } };
 }
 
 /**
@@ -419,9 +399,8 @@ async function optimizeProject(projectDescription, targetPosition = '', options 
     project_description: projectDescription,
     target_position: targetPosition || '通用技术岗位',
   });
-  const { content, usage, model } = await callDeepseek(prompt, { task: AI_TASK.PROJECT_OPTIMIZE, model: options.model });
-  await notifyCallMeta(options, model, usage);
-  return extractJson(content);
+  const { content, usage, model, cost } = await callDeepseek(prompt, { task: AI_TASK.PROJECT_OPTIMIZE, model: options.model });
+  return { data: extractJson(content), meta: { model, usage, cost } };
 }
 
 /**
@@ -430,14 +409,16 @@ async function optimizeProject(projectDescription, targetPosition = '', options 
  */
 async function matchJd(resumeContent, jdText, options = {}) {
   const prompt = format(JD_MATCH_PROMPT, { resume_content: resumeContent, jd_text: jdText });
-  const { content, usage, model } = await callDeepseek(prompt, { task: AI_TASK.JD_MATCH, model: options.model });
-  await notifyCallMeta(options, model, usage);
-  const data = extractJson(content);
+  const { content, usage, model, cost } = await callDeepseek(prompt, { task: AI_TASK.JD_MATCH, model: options.model });
+  const parsed = extractJson(content);
   return {
-    match_score: data.match_score || 0,
-    keywords: data.keywords || [],
-    missing_skills: data.missing_skills || [],
-    suggestions: data.suggestions || [],
+    data: {
+      match_score: parsed.match_score || 0,
+      keywords: parsed.keywords || [],
+      missing_skills: parsed.missing_skills || [],
+      suggestions: parsed.suggestions || [],
+    },
+    meta: { model, usage, cost },
   };
 }
 
@@ -447,16 +428,18 @@ async function matchJd(resumeContent, jdText, options = {}) {
  */
 async function scoreResume(resumeContent, options = {}) {
   const prompt = format(SCORE_PROMPT, { resume_content: resumeContent });
-  const { content, usage, model } = await callDeepseek(prompt, { task: AI_TASK.SCORE, model: options.model });
-  await notifyCallMeta(options, model, usage);
-  const data = extractJson(content);
+  const { content, usage, model, cost } = await callDeepseek(prompt, { task: AI_TASK.SCORE, model: options.model });
+  const parsed = extractJson(content);
   return {
-    content_completeness: data.content_completeness || 0,
-    skill_match: data.skill_match || 0,
-    project_quality: data.project_quality || 0,
-    resume_structure: data.resume_structure || 0,
-    format_quality: data.format_quality || 0,
-    total: data.total || 0,
+    data: {
+      content_completeness: parsed.content_completeness || 0,
+      skill_match: parsed.skill_match || 0,
+      project_quality: parsed.project_quality || 0,
+      resume_structure: parsed.resume_structure || 0,
+      format_quality: parsed.format_quality || 0,
+      total: parsed.total || 0,
+    },
+    meta: { model, usage, cost },
   };
 }
 
@@ -471,16 +454,18 @@ async function optimizeFromPdfText(pdfText, targetPosition = '', options = {}) {
     pdf_text: pdfText,
     target_position: targetPosition || '通用职业方向',
   });
-  const { content, usage, model } = await callDeepseek(prompt, { task: AI_TASK.PDF_OPTIMIZE, model: options.model });
-  await notifyCallMeta(options, model, usage);
-  const data = extractJson(content);
-  if (!data || Object.keys(data).length === 0) {
-    return { resume: {}, optimization_notes: [] };
+  const { content, usage, model, cost } = await callDeepseek(prompt, { task: AI_TASK.PDF_OPTIMIZE, model: options.model });
+  const parsed = extractJson(content);
+  if (!parsed || Object.keys(parsed).length === 0) {
+    return { data: { resume: {}, optimization_notes: [] }, meta: { model, usage, cost } };
   }
-  const resume = normalizePdfResume(data);
+  const resume = normalizePdfResume(parsed);
   return {
-    resume: hasResumeContent(resume) ? resume : {},
-    optimization_notes: data.optimization_notes || data.resume?.optimization_notes || [],
+    data: {
+      resume: hasResumeContent(resume) ? resume : {},
+      optimization_notes: parsed.optimization_notes || parsed.resume?.optimization_notes || [],
+    },
+    meta: { model, usage, cost },
   };
 }
 
@@ -492,20 +477,22 @@ async function optimizeFromPdfTextStream(pdfText, targetPosition = '', options =
     pdf_text: pdfText,
     target_position: targetPosition || '通用职业方向',
   });
-  const { content, usage, model } = await callDeepseekStream(
+  const { content, usage, model, cost } = await callDeepseekStream(
     prompt,
     { task: AI_TASK.PDF_OPTIMIZE, model: options.model },
     onChunk,
   );
-  await notifyCallMeta(options, model, usage);
-  const data = extractJson(content);
-  if (!data || Object.keys(data).length === 0) {
-    return { resume: {}, optimization_notes: [] };
+  const parsed = extractJson(content);
+  if (!parsed || Object.keys(parsed).length === 0) {
+    return { data: { resume: {}, optimization_notes: [] }, meta: { model, usage, cost } };
   }
-  const resume = normalizePdfResume(data);
+  const resume = normalizePdfResume(parsed);
   return {
-    resume: hasResumeContent(resume) ? resume : {},
-    optimization_notes: data.optimization_notes || data.resume?.optimization_notes || [],
+    data: {
+      resume: hasResumeContent(resume) ? resume : {},
+      optimization_notes: parsed.optimization_notes || parsed.resume?.optimization_notes || [],
+    },
+    meta: { model, usage, cost },
   };
 }
 
