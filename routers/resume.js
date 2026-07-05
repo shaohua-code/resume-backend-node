@@ -118,8 +118,11 @@ router.post('/generate', async (req, res) => {
   const model = getRequestedModel(req);
   try {
     await ensureAiQuota(req, taskType);
-    const userInput = JSON.stringify(req.body || {});
-    const { data, meta } = await aiService.generateResume(userInput, { model });
+    const body = req.body || {};
+    const isLazy = body.input_mode === 'lazy';
+    const aiOptions = { model, inputMode: isLazy ? 'lazy' : 'form' };
+    const userInput = isLazy ? body : JSON.stringify(body);
+    const { data, meta } = await aiService.generateResume(userInput, aiOptions);
     if (!data || Object.keys(data).length === 0) {
       await recordAiCall(req, taskType, model, false, 'AI生成简历失败，请重试');
       return res.status(500).json({ detail: 'AI生成简历失败，请重试' });
@@ -156,8 +159,11 @@ router.post('/generate/stream', async (req, res) => {
 
   try {
     await ensureAiQuota(req, taskType);
-    const userInput = JSON.stringify(req.body || {});
-    const { data, meta } = await aiService.generateResumeStream(userInput, { model }, (chunk) => {
+    const body = req.body || {};
+    const isLazy = body.input_mode === 'lazy';
+    const aiOptions = { model, inputMode: isLazy ? 'lazy' : 'form' };
+    const userInput = isLazy ? body : JSON.stringify(body);
+    const { data, meta } = await aiService.generateResumeStream(userInput, aiOptions, (chunk) => {
       sendEvent({ chunk });
     });
     if (!data || Object.keys(data).length === 0) {
