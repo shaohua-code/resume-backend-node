@@ -12,7 +12,7 @@ const resumeRouter = require('./routers/resume');
 const adminRouter = require('./routers/admin');
 
 const app = express();
-console.log(settings);
+console.log('settings',settings);
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
