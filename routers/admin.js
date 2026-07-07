@@ -465,4 +465,36 @@ createCrudRoutes('/plans', 'membership_plan', PERMISSIONS.ADMIN_MEMBERSHIP_PLAN)
 createCrudRoutes('/announcements', 'announcement', PERMISSIONS.ADMIN_ANNOUNCEMENT);
 createCrudRoutes('/models', 'ai_model', PERMISSIONS.ADMIN_AI_MODEL);
 
+// 用户反馈（仅 SUPER_ADMIN）
+router.get('/feedbacks', requirePermission(PERMISSIONS.ADMIN_VIEW_FEEDBACK), async (req, res) => {
+  const { page, size, from, to } = parsePagination(req);
+  const { data, error, count } = await supabaseAdmin
+    .from('user_feedback')
+    .select('*', { count: 'exact' })
+    .order('create_time', { ascending: false })
+    .range(from, to);
+
+  if (error) {
+    return res.status(500).json({ detail: `查询失败：${error.message}` });
+  }
+
+  const items = await attachUserProfiles(data || []);
+  return res.json({ success: true, items, total: count || 0, page, size });
+});
+
+router.get('/feedbacks/:id', requirePermission(PERMISSIONS.ADMIN_VIEW_FEEDBACK), async (req, res) => {
+  const { data, error } = await supabaseAdmin
+    .from('user_feedback')
+    .select('*')
+    .eq('id', req.params.id)
+    .single();
+
+  if (error || !data) {
+    return res.status(404).json({ detail: '反馈不存在' });
+  }
+
+  const [item] = await attachUserProfiles([data]);
+  return res.json({ success: true, data: item });
+});
+
 module.exports = router;

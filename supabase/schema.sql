@@ -242,6 +242,23 @@ drop policy if exists "service_role_all_admin_action_log" on public.admin_action
 create policy "service_role_all_admin_action_log" on public.admin_action_log
   for all to service_role using (true) with check (true);
 
+-- 用户反馈表：富文本 HTML + Markdown 预览内容
+create table if not exists public.user_feedback (
+  id           bigserial primary key,
+  user_id      uuid references auth.users(id) on delete set null,
+  content_html text not null default '',
+  content_md   text not null default '',
+  create_time  timestamptz default now()
+);
+create index if not exists idx_user_feedback_user_id on public.user_feedback(user_id);
+create index if not exists idx_user_feedback_create_time on public.user_feedback(create_time desc);
+
+alter table public.user_feedback enable row level security;
+drop policy if exists "service_role_all_user_feedback" on public.user_feedback;
+create policy "service_role_all_user_feedback" on public.user_feedback
+  for all to service_role using (true) with check (true);
+grant all privileges on table public.user_feedback to service_role;
+
 -- 超级管理员初始化：先登录一次，再把下面邮箱替换成你的管理员邮箱执行
 -- update public.user_profile
 -- set role = 'SUPER_ADMIN', status = 'ACTIVE', update_time = now()

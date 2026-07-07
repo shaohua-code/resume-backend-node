@@ -6,10 +6,13 @@
 
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const { settings } = require('./config');
 const authRouter = require('./routers/auth');
 const resumeRouter = require('./routers/resume');
 const adminRouter = require('./routers/admin');
+const uploadRouter = require('./routers/upload');
+const feedbackRouter = require('./routers/feedback');
 
 const app = express();
 console.log('settings',settings);
@@ -33,6 +36,9 @@ app.get('/', (req, res) => {
 app.use('/api/auth', authRouter);
 app.use('/api/resume', resumeRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/upload', uploadRouter);
+app.use('/api/feedback', feedbackRouter);
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.use((err, req, res, next) => {
   console.error('[全局错误]', err);

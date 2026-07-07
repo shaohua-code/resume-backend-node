@@ -21,15 +21,15 @@ AI 简历助手校园版后端。Express 4 + Supabase Postgres/Auth + DeepSeek A
 ## 项目结构
 
 ```
-main.js              # 入口，挂载 /api/auth|resume|admin
+main.js              # 入口，挂载 /api/auth|resume|admin|upload|feedback + /uploads 静态
 config.js            # 环境变量 → settings
 supabaseClient.js    # supabaseAuth（Auth）+ supabaseAdmin（DB CRUD）
-routers/             # auth.js | resume.js | admin.js
+routers/             # auth.js | resume.js | admin.js | upload.js | feedback.js
 middlewares/         # auth.js authRequired | permission.js RBAC
 services/            # auth_service | user_profile_service | ai_service
 utils/               # permissions.js | ai_cost.js
 supabase/schema.sql  # 建表 + RLS + 种子
-uploads/             # 运行时 PDF 存储
+uploads/             # 运行时文件存储（PDF + uploads/files/ 通用上传）
 ```
 
 **无 ORM**：直接用 `@supabase/supabase-js` 查询；表结构以 `supabase/schema.sql` 为准。
@@ -94,9 +94,22 @@ uploads/             # 运行时 PDF 存储
 ## resume_json 字段（AI 与 CRUD 共用）
 
 ```
-name, target_position, school, major, education, phone, email, summary,
+name, target_position, school, major, education, phone, email, summary, avatar,
 skills[], projects[], internships[], awards[], certificates[]
 ```
+
+`avatar` 为上传文件 URL（`/uploads/files/{userId}/...`），可选字段。
+
+## 用户反馈与上传 API
+
+| 路由 | 说明 |
+|------|------|
+| `POST /api/upload/file` | 统一上传（图片/PDF/文档），需登录 |
+| `POST /api/feedback` | 用户提交反馈（body: content_html），服务端 turndown 转 MD |
+| `GET /api/admin/feedbacks` | 反馈列表（permission: admin:view_feedback，仅 SUPER_ADMIN） |
+| `GET /api/admin/feedbacks/:id` | 反馈详情 |
+
+表 `user_feedback`：content_html、content_md、user_id、create_time。
 
 前端编辑器另存 `_editorSettings`（间距/字体/皮肤/模块显隐），后端按 text 存 `resume_json`。
 

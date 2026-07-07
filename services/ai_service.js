@@ -367,6 +367,7 @@ function normalizePdfResume(data) {
     internships: Array.isArray(source.internships) ? source.internships.map(normalizeInternship) : [],
     awards: Array.isArray(source.awards) ? source.awards.filter(Boolean) : [],
     certificates: Array.isArray(source.certificates) ? source.certificates.filter(Boolean) : [],
+    avatar: source.avatar || '',
   };
 }
 
