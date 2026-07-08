@@ -20,7 +20,7 @@ const {
   signInWithPassword,
   resolveLoginEmail,
   isUsernameTaken,
-} = require('../services/auth_service');
+} = require('../services/auth/auth.service');
 const { ensureUserProfile, getUserProfile } = require('../services/user_profile_service');
 
 const router = express.Router();

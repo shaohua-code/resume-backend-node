@@ -1,0 +1,54 @@
+/**
+ * AI 接口参数校验规则
+ * 配合 express-validator 使用
+ */
+
+const { body, param } = require('express-validator')
+
+const ALLOWED_OPTIMIZE_TYPES = ['summary', 'skills', 'project', 'internship']
+
+/**
+ * AI 生成简历参数校验
+ */
+const generate = [
+  body('target_position').optional().isString().withMessage('target_position 必须是字符串'),
+]
+
+/**
+ * 分模块流式优化参数校验
+ */
+const optimizeStream = [
+  param('type')
+    .isIn(ALLOWED_OPTIMIZE_TYPES)
+    .withMessage(`优化类型只能是：${ALLOWED_OPTIMIZE_TYPES.join('、')}`),
+  body('resume').isObject().withMessage('resume 必须是对象'),
+  body('resume.target_position')
+    .notEmpty()
+    .withMessage('请先填写意向岗位'),
+  body('index')
+    .optional()
+    .isInt({ min: 0 })
+    .withMessage('index 必须是非负整数'),
+]
+
+/**
+ * JD 匹配参数校验
+ */
+const matchJd = [
+  body('resume_id').notEmpty().withMessage('resume_id 不能为空'),
+  body('jd_text').notEmpty().withMessage('jd_text 不能为空'),
+]
+
+/**
+ * 简历评分参数校验
+ */
+const score = [
+  body('resume_id').optional().isString().withMessage('resume_id 必须是字符串'),
+]
+
+module.exports = {
+  generate,
+  optimizeStream,
+  matchJd,
+  score,
+}

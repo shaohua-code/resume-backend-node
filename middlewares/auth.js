@@ -4,7 +4,7 @@
  * 请求头格式：Authorization: Bearer <access_token>
  */
 
-const { getUserByToken } = require('../services/auth_service');
+const { getUserByToken } = require('../services/auth/auth.service');
 const { ensureUserProfile } = require('../services/user_profile_service');
 
 async function authRequired(req, res, next) {

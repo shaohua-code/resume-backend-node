@@ -1,0 +1,54 @@
+/**
+ * PDF 路由模块
+ * 挂载路径前缀：/api/pdf
+ * 职责：PDF 上传、解析、AI 整体优化、已上传文件管理
+ */
+
+const express = require('express')
+const { authRequired } = require('../middlewares/auth')
+const { validate } = require('../middlewares/validate')
+const pdfController = require('../controllers/pdf.controller')
+const pdfValidator = require('../validators/pdf.validator')
+
+const router = express.Router()
+
+// 所有 PDF 接口都需要登录
+router.use(authRequired)
+
+/**
+ * 上传 PDF 并由 AI 同步优化
+ * POST /api/pdf/uploadOptimize
+ */
+router.post('/uploadOptimize', pdfValidator.uploadOptimize, validate, pdfController.uploadOptimize)
+
+/**
+ * 上传 PDF 并由 AI 流式优化（SSE）
+ * POST /api/pdf/uploadOptimize/stream
+ */
+router.post('/uploadOptimize/stream', pdfValidator.uploadOptimize, validate, pdfController.uploadOptimizeStream)
+
+/**
+ * 使用已上传 PDF 进行 AI 同步优化
+ * POST /api/pdf/uploadOptimize/existing
+ */
+router.post('/uploadOptimize/existing', pdfValidator.existingOptimize, validate, pdfController.existingOptimize)
+
+/**
+ * 使用已上传 PDF 进行 AI 流式优化（SSE）
+ * POST /api/pdf/uploadOptimize/existing/stream
+ */
+router.post('/uploadOptimize/existing/stream', pdfValidator.existingOptimize, validate, pdfController.existingOptimizeStream)
+
+/**
+ * 获取当前用户已上传 PDF 元信息
+ * GET /api/pdf/uploadedFile
+ */
+router.get('/uploadedFile', pdfController.uploadedFileMeta)
+
+/**
+ * 删除当前用户已上传 PDF
+ * DELETE /api/pdf/uploadedFile
+ */
+router.delete('/uploadedFile', pdfController.deleteUploadedFile)
+
+module.exports = router

@@ -8,7 +8,7 @@
  * 用户表由 Supabase Auth 自动维护（auth.users 表），无需自己管理用户注册流程
  */
 
-const { supabaseAuth, supabaseAdmin } = require('../supabaseClient');
+const { supabaseAuth, supabaseAdmin } = require('../../supabaseClient');
 
 /**
  * 发送邮箱验证码（OTP）
@@ -156,7 +156,7 @@ async function signInWithPassword(email, password) {
   return data;
 }
 
-/**
+/** 
  * 根据邮箱或用户名解析登录邮箱
  * 用户名保存在业务 profile 的 nickname 字段，最终仍使用 Supabase 邮箱密码登录。
  */
