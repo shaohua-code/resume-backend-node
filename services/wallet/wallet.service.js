@@ -13,6 +13,7 @@ const LEDGER_TYPES = {
   REGISTER_GIFT: 'REGISTER_GIFT',
   ADMIN_GRANT: 'ADMIN_GRANT',
   ADMIN_DEDUCT: 'ADMIN_DEDUCT',
+  ADMIN_TRANSFER_OUT: 'ADMIN_TRANSFER_OUT', // 管理员向用户划拨时扣减自身额度
   AI_CONSUME: 'AI_CONSUME',
   REFUND: 'REFUND',
 }
@@ -93,6 +94,109 @@ async function initWalletForNewUser(userId) {
   }
 
   return wallet
+}
+
+/**
+ * 确保用户有钱包记录（余额为 0，不触发注册赠送）
+ * 用于管理员额度池等场景
+ * @param {string} userId
+ */
+async function ensureWalletRecord(userId) {
+  const existing = await getWalletOrNull(userId)
+  if (existing) {
+    return existing
+  }
+
+  const now = new Date().toISOString()
+  const { data: wallet, error } = await walletRepo.createWallet({
+    user_id: userId,
+    balance: 0,
+    total_consumed: 0,
+    update_time: now,
+  })
+
+  if (error) {
+    throw Object.assign(new Error(`创建钱包失败：${error.message}`), { statusCode: 500 })
+  }
+
+  return wallet
+}
+
+/**
+ * 确保目标用户有钱包：普通用户走注册赠送逻辑，管理员仅创建空钱包
+ * @param {Object} targetProfile
+ */
+async function ensureTargetWallet(targetProfile) {
+  if (targetProfile.role === ROLES.USER) {
+    await getBalance(targetProfile.user_id)
+    return
+  }
+  await ensureWalletRecord(targetProfile.user_id)
+}
+
+/**
+ * 管理员从自身额度池向用户划拨（扣减操作者、增加目标用户）
+ * @param {Object} operator
+ * @param {Object} target
+ * @param {number} amount
+ * @param {string} remark
+ */
+async function transferBalanceFromAdmin(operator, target, amount, remark = '') {
+  const transferAmount = roundMoney(amount)
+  if (transferAmount <= 0) {
+    throw Object.assign(new Error('划拨金额必须大于 0'), { statusCode: 400 })
+  }
+
+  await ensureWalletRecord(operator.id)
+  await ensureTargetWallet(target)
+
+  const operatorBalance = roundMoney((await getWalletOrNull(operator.id)).balance)
+  if (operatorBalance < transferAmount) {
+    const err = new Error(`可分配额度不足（当前 ¥${operatorBalance.toFixed(2)}）`)
+    err.code = 'INSUFFICIENT_BALANCE'
+    err.statusCode = 402
+    throw err
+  }
+
+  const transferRemark = remark || `向用户 ${target.nickname || target.email || target.user_id} 划拨额度`
+  const operatorName = operator.profile?.nickname || operator.email || operator.id
+  const grantRemark = remark || `管理员 ${operatorName} 划拨额度`
+
+  // 先扣减管理员自身额度
+  await changeBalance({
+    userId: operator.id,
+    delta: -transferAmount,
+    type: LEDGER_TYPES.ADMIN_TRANSFER_OUT,
+    remark: transferRemark,
+    operatorId: operator.id,
+  })
+
+  try {
+    const result = await changeBalance({
+      userId: target.user_id,
+      delta: transferAmount,
+      type: LEDGER_TYPES.ADMIN_GRANT,
+      remark: grantRemark,
+      operatorId: operator.id,
+    })
+
+    return {
+      user_id: target.user_id,
+      balance: result.balance,
+      amount: transferAmount,
+      operator_balance: roundMoney((await getWalletOrNull(operator.id)).balance),
+    }
+  } catch (error) {
+    // 划拨失败时回滚管理员扣减
+    await changeBalance({
+      userId: operator.id,
+      delta: transferAmount,
+      type: LEDGER_TYPES.REFUND,
+      remark: '用户划拨失败回滚',
+      operatorId: operator.id,
+    })
+    throw error
+  }
 }
 
 /**
@@ -276,27 +380,31 @@ async function adjustBalanceByAdmin(operator, targetUserId, amount, remark = '')
     throw Object.assign(new Error('无权调整用户额度'), { statusCode: 403 })
   }
 
-  // 普通管理员只能给 USER 角色增加额度
+  // 普通管理员只能给 USER 角色增加额度，且从自身额度池划拨
   if (operator.role === ROLES.ADMIN) {
     if (target.role !== ROLES.USER) {
-      throw Object.assign(new Error('管理员仅可为普通用户增加额度'), { statusCode: 403 })
+      throw Object.assign(new Error('管理员仅可为普通用户划拨额度'), { statusCode: 403 })
     }
     if (delta < 0) {
       throw Object.assign(new Error('管理员无法扣减用户额度'), { statusCode: 403 })
     }
+    return transferBalanceFromAdmin(operator, target, delta, remark)
   } else if (!canManageRole(operator.role, target.role) && operator.id !== target.user_id) {
     throw Object.assign(new Error('无权操作该用户'), { statusCode: 403 })
   }
 
-  // 确保目标用户有钱包
-  await getBalance(targetUserId)
+  // 超级管理员：直接增减目标用户额度（给管理员分配额度池 / 给用户充值）
+  await ensureTargetWallet(target)
 
   const ledgerType = delta > 0 ? LEDGER_TYPES.ADMIN_GRANT : LEDGER_TYPES.ADMIN_DEDUCT
+  const defaultRemark = delta > 0
+    ? (target.role === ROLES.ADMIN ? '超级管理员分配额度池' : '超级管理员增加额度')
+    : '超级管理员扣减额度'
   const result = await changeBalance({
     userId: targetUserId,
     delta,
     type: ledgerType,
-    remark: remark || (delta > 0 ? '管理员增加额度' : '管理员扣减额度'),
+    remark: remark || defaultRemark,
     operatorId: operator.id,
   })
 
