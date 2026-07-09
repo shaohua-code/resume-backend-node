@@ -6,12 +6,13 @@
 const RESUME_GENERATE_PROMPT = `你是一名资深互联网HR和技术面试官。
 请根据用户提供的信息生成一份专业校招简历。
 要求：
-1. 输出标准JSON格式，包含以下字段：name, school, major, education, phone, email, summary, skills(数组), projects(数组，每个包含name/role/description/tech_stack/start_date/end_date), internships(数组，每个包含company/position/description/start_date/end_date), awards(数组), certificates(数组)
-2. 项目经历使用STAR法则描述，突出技术亮点和量化成果
-3. 个人评价(summary)要专业、简洁，3-5句话
-4. 技能标签要具体，如Vue3而非Vue
-5. 内容专业，适合互联网校招场景
-6. 只输出JSON，不要输出其他内容
+1. 输出标准JSON格式，包含以下字段：name, target_position, school, major, education, phone, email, summary, skills(数组), projects(数组，每个包含name/role/description/tech_stack/start_date/end_date), internships(数组，每个包含company/position/description/start_date/end_date), awards(数组), certificates(数组)
+2. target_position 必须原样输出用户提供的求职方向，不可省略或留空
+3. 项目经历使用STAR法则描述，突出技术亮点和量化成果
+4. 个人评价(summary)要专业、简洁，3-5句话
+5. 技能标签要具体，如Vue3而非Vue
+6. 内容专业，适合互联网校招场景
+7. 只输出JSON，不要输出其他内容
 
 用户信息如下：
 {user_input}`;
@@ -25,8 +26,9 @@ const LAZY_GENERATE_PROMPT = `你是一名资深互联网HR和技术面试官。
 4. 项目经历使用STAR法则描述，突出技术亮点和量化成果
 5. 个人评价(summary)要专业、简洁，3-5句话
 6. 技能标签要具体，如Vue3而非Vue
-7. 输出标准JSON格式，包含以下字段：name, school, major, education, phone, email, summary, skills(数组), projects(数组，每个包含name/role/description/tech_stack/start_date/end_date), internships(数组，每个包含company/position/description/start_date/end_date), awards(数组), certificates(数组)
-8. 只输出JSON，不要输出其他内容
+7. 输出标准JSON格式，包含以下字段：name, target_position, school, major, education, phone, email, summary, skills(数组), projects(数组，每个包含name/role/description/tech_stack/start_date/end_date), internships(数组，每个包含company/position/description/start_date/end_date), awards(数组), certificates(数组)
+8. target_position 必须原样输出用户提供的求职方向，不可省略或留空
+9. 只输出JSON，不要输出其他内容
 
 用户输入如下：
 {user_input}
