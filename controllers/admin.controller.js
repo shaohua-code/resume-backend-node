@@ -52,9 +52,14 @@ async function getStats(req, res) {
  * @param {Object} req - Express 请求对象
  * @param {Object} res - Express 响应对象
  */
+/**
+ * 获取数据中心大盘数据（支持时间范围筛选）
+ * 查询参数：range=今日/昨日/7日/30日/年度
+ */
 async function getDashboard(req, res) {
   try {
-    const data = await dashboardService.getDashboard();
+    // 将请求对象传递给服务层，用于读取查询参数
+    const data = await dashboardService.getDashboard(req);
     return res.json({ success: true, data });
   } catch (err) {
     return handleError(res, err);

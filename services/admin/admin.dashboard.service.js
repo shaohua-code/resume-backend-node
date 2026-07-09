@@ -110,13 +110,56 @@ async function getStats() {
 }
 
 /**
- * 获取管理后台数据中心大盘数据
+ * 根据时间范围字符串计算起始日期
+ * @param {string} range - 时间范围（今日/昨日/7日/30日/年度）
+ * @returns {Date} 起始日期
  */
-async function getDashboard() {
+function getRangeStartDate(range) {
+  const now = new Date()
+
+  switch (range) {
+    case '今日':
+      return startOfDay(0)  // 今天 00:00:00
+    case '昨日':
+      return startOfDay(-1)  // 昨天 00:00:00
+    case '7日':
+      return startOfDay(-7)  // 7天前 00:00:00
+    case '30日':
+      return startOfDay(-30)  // 30天前 00:00:00
+    case '年度':
+    default:
+      // 默认：去年同月1日到现在（12个月数据）
+      return new Date(now.getFullYear() - 1, now.getMonth(), 1)
+  }
+}
+
+/**
+ * 根据时间范围获取月份列表
+ * @param {string} range - 时间范围
+ * @returns {string[]} 月份 key 数组
+ */
+function getRangeMonths(range) {
+  if (range === '年度') {
+    return buildRecentMonths(12)  // 12个月
+  }
+  // 其他范围：只返回当前月份（用于单点统计，不显示趋势图）
+  const now = new Date()
+  const key = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  return [key]
+}
+
+/**
+ * 获取管理后台数据中心大盘数据
+ * @param {Object} req - Express 请求对象（包含查询参数 range）
+ */
+async function getDashboard(req) {
+  // 从查询参数获取时间范围，默认为"年度"
+  const range = (req && req.query && req.query.range) || '年度'
+  const rangeStart = getRangeStartDate(range).toISOString()
+  const months = getRangeMonths(range)
+
   const todayStart = startOfDay(0).toISOString()
   const yesterdayStart = startOfDay(-1).toISOString()
-  const months = buildRecentMonths(12)
-  const yearStart = new Date(new Date().getFullYear() - 1, new Date().getMonth(), 1).toISOString()
 
   const [userCount, adminCount, resumeCount, todayNewUsers, yesterdayNewUsers, walletStats, ledgerStats] = await Promise.all([
     getTableCount('user_profile'),
@@ -128,7 +171,7 @@ async function getDashboard() {
     supabaseAdmin
       .from('balance_ledger')
       .select('amount,type,create_time')
-      .gte('create_time', yearStart),
+      .gte('create_time', rangeStart),  // 使用动态时间范围
   ])
 
   const wallets = walletStats.data || []
@@ -143,8 +186,8 @@ async function getDashboard() {
     supabaseAdmin
       .from('user_profile')
       .select('create_time,role')
-      .gte('create_time', yearStart),
-    aiCallRepo.findAllAiCalls(yearStart),
+      .gte('create_time', rangeStart),  // 使用动态时间范围
+    aiCallRepo.findAllAiCalls(rangeStart),  // 使用动态时间范围
   ])
 
   const userTrend = bucketByMonth(userRows, months)
