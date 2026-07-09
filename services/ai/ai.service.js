@@ -150,6 +150,61 @@ function joinTechStack(techStack) {
   return techStack || '';
 }
 
+function normalizeEducationItem(item = {}) {
+  return {
+    school: item.school || '',
+    major: item.major || '',
+    degree: item.degree || item.education || '',
+    start_date: item.start_date || '',
+    end_date: item.end_date || '',
+  };
+}
+
+function normalizeCustomField(item = {}) {
+  return {
+    label: (item.label || '').trim(),
+    value: (item.value || '').trim(),
+  };
+}
+
+/**
+ * 归一化教育背景数组，兼容 educations[] / education[] 与扁平 school/major/education
+ */
+function normalizeEducations(source = {}) {
+  const list = source.educations || source.education_list || [];
+
+  if (Array.isArray(list) && list.length) {
+    return list
+      .map(normalizeEducationItem)
+      .filter((item) => item.school || item.major || item.degree || item.start_date || item.end_date);
+  }
+
+  if (Array.isArray(source.education) && source.education.length) {
+    return source.education
+      .map(normalizeEducationItem)
+      .filter((item) => item.school || item.major || item.degree || item.start_date || item.end_date);
+  }
+
+  if (source.school || source.major || source.education || source.degree) {
+    return [normalizeEducationItem({
+      school: source.school,
+      major: source.major,
+      degree: source.education || source.degree,
+    })];
+  }
+
+  return [];
+}
+
+/** 归一化自定义键值对 */
+function normalizeCustomFields(source = {}) {
+  const list = source.custom_fields || source.customFields || [];
+  if (!Array.isArray(list)) return [];
+  return list
+    .map(normalizeCustomField)
+    .filter((item) => item.label && item.value);
+}
+
 function normalizeEducation(education) {
   if (Array.isArray(education)) {
     return education[0] || {};
@@ -183,23 +238,35 @@ function normalizeInternship(internship) {
 
 function normalizePdfResume(data) {
   const source = data.resume && typeof data.resume === 'object' ? data.resume : data;
-  const education = normalizeEducation(source.education);
+  const educations = normalizeEducations(source);
+  const firstEdu = educations[0] || normalizeEducation(source.education);
+  const customFields = normalizeCustomFields(source);
 
   return {
     name: source.name || '',
     target_position: source.target_position || source.targetPosition || '',
-    school: source.school || education.school || '',
-    major: source.major || education.major || '',
-    education: source.degree || education.degree || source.education_text || '',
     phone: source.phone || '',
     email: source.email || '',
     summary: source.summary || '',
+    avatar: source.avatar || '',
+    work_years: source.work_years || source.workYears || '',
+    marital_status: source.marital_status || source.maritalStatus || '',
+    height: source.height || '',
+    weight: source.weight || '',
+    ethnicity: source.ethnicity || '',
+    native_place: source.native_place || source.nativePlace || source.origin || '',
+    political_status: source.political_status || source.politicalStatus || '',
+    expected_salary: source.expected_salary || source.expectedSalary || source.salary || '',
+    custom_fields: customFields,
+    educations,
+    school: source.school || firstEdu.school || '',
+    major: source.major || firstEdu.major || '',
+    education: source.education || firstEdu.degree || source.degree || '',
     skills: Array.isArray(source.skills) ? source.skills.filter(Boolean) : [],
     projects: Array.isArray(source.projects) ? source.projects.map(normalizeProject) : [],
     internships: Array.isArray(source.internships) ? source.internships.map(normalizeInternship) : [],
     awards: Array.isArray(source.awards) ? source.awards.filter(Boolean) : [],
     certificates: Array.isArray(source.certificates) ? source.certificates.filter(Boolean) : [],
-    avatar: source.avatar || '',
   };
 }
 
@@ -210,6 +277,7 @@ function hasResumeContent(resume) {
       resume.email ||
       resume.summary ||
       resume.school ||
+      (Array.isArray(resume.educations) && resume.educations.length) ||
       resume.projects.length ||
       resume.internships.length ||
       resume.skills.length ||
@@ -228,7 +296,20 @@ function buildResumeContext(resume) {
   const parts = [];
   parts.push(`姓名：${data.name || ''}`);
   parts.push(`目标岗位：${data.target_position || ''}`);
-  parts.push(`学校：${data.school || ''} ${data.major || ''} ${data.education || ''}`);
+  if (data.work_years) parts.push(`工作年限：${data.work_years}`);
+  if (data.expected_salary) parts.push(`期望薪资：${data.expected_salary}`);
+
+  const educations = normalizeEducations(data);
+  if (educations.length) {
+    const eduText = educations.map((e) => {
+      const range = [e.start_date, e.end_date].filter(Boolean).join('~');
+      return `- ${e.school || ''} ${e.major || ''} ${e.degree || ''}${range ? `（${range}）` : ''}`;
+    }).join('\n');
+    parts.push(`教育背景：\n${eduText}`);
+  } else {
+    parts.push(`学校：${data.school || ''} ${data.major || ''} ${data.education || ''}`);
+  }
+
   if (Array.isArray(data.skills) && data.skills.length) {
     parts.push(`技能：${data.skills.join('、')}`);
   }

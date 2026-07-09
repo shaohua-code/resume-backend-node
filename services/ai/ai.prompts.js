@@ -6,13 +6,20 @@
 const RESUME_GENERATE_PROMPT = `你是一名资深互联网HR和技术面试官。
 请根据用户提供的信息生成一份专业校招简历。
 要求：
-1. 输出标准JSON格式，包含以下字段：name, target_position, school, major, education, phone, email, summary, skills(数组), projects(数组，每个包含name/role/description/tech_stack/start_date/end_date), internships(数组，每个包含company/position/description/start_date/end_date), awards(数组), certificates(数组)
-2. target_position 必须原样输出用户提供的求职方向，不可省略或留空
-3. 项目经历使用STAR法则描述，突出技术亮点和量化成果
-4. 个人评价(summary)要专业、简洁，3-5句话
-5. 技能标签要具体，如Vue3而非Vue
-6. 内容专业，适合互联网校招场景
-7. 只输出JSON，不要输出其他内容
+1. 输出标准JSON格式，包含以下字段：name, target_position, phone, email, summary, avatar,
+   work_years, marital_status, height, weight, ethnicity, native_place, political_status, expected_salary,
+   custom_fields(数组，每项包含label/value),
+   educations(数组，每项包含school/major/degree/start_date/end_date),
+   school, major, education(向后兼容，可与educations首条同步),
+   skills(数组), projects(数组，每个包含name/role/description/tech_stack/start_date/end_date),
+   internships(数组，每个包含company/position/description/start_date/end_date), awards(数组), certificates(数组)
+2. 扩展基本信息字段与教育背景均为可选，缺失时填空字符串或空数组；教育经历使用educations数组，不要仅塞进基本信息
+3. target_position 必须原样输出用户提供的求职方向，不可省略或留空
+4. 项目经历使用STAR法则描述，突出技术亮点和量化成果
+5. 个人评价(summary)要专业、简洁，3-5句话
+6. 技能标签要具体，如Vue3而非Vue
+7. 内容专业，适合互联网校招场景
+8. 只输出JSON，不要输出其他内容
 
 用户信息如下：
 {user_input}`;
@@ -26,9 +33,16 @@ const LAZY_GENERATE_PROMPT = `你是一名资深互联网HR和技术面试官。
 4. 项目经历使用STAR法则描述，突出技术亮点和量化成果
 5. 个人评价(summary)要专业、简洁，3-5句话
 6. 技能标签要具体，如Vue3而非Vue
-7. 输出标准JSON格式，包含以下字段：name, target_position, school, major, education, phone, email, summary, skills(数组), projects(数组，每个包含name/role/description/tech_stack/start_date/end_date), internships(数组，每个包含company/position/description/start_date/end_date), awards(数组), certificates(数组)
-8. target_position 必须原样输出用户提供的求职方向，不可省略或留空
-9. 只输出JSON，不要输出其他内容
+7. 输出标准JSON格式，包含以下字段：name, target_position, phone, email, summary, avatar,
+   work_years, marital_status, height, weight, ethnicity, native_place, political_status, expected_salary,
+   custom_fields(数组，每项包含label/value),
+   educations(数组，每项包含school/major/degree/start_date/end_date),
+   school, major, education(向后兼容),
+   skills(数组), projects(数组，每个包含name/role/description/tech_stack/start_date/end_date),
+   internships(数组，每个包含company/position/description/start_date/end_date), awards(数组), certificates(数组)
+8. 扩展基本信息与教育背景均为可选；教育使用educations独立数组
+9. target_position 必须原样输出用户提供的求职方向，不可省略或留空
+10. 只输出JSON，不要输出其他内容
 
 用户输入如下：
 {user_input}
@@ -126,11 +140,13 @@ const PDF_OPTIMIZE_PROMPT = `
 1. name：姓名 字符串
 2. phone：联系电话 字符串，无则""
 3. email：邮箱 字符串，无则""
-4. education：教育经历数组，每项结构：
-   {"school":"学校名称","major":"专业","degree":"学历（本科/硕士）","start_date":"入学年月","end_date":"毕业年月","gpa":"绩点，无则填写无"}
-5. summary：个人简介，3-5句话，总字数80-150字；贴合目标岗位，突出匹配度、核心技术栈、工作年限、核心业务能力、个人优势
-6. skills：技能标签数组，拆分颗粒度细化，禁止笼统词汇；按与目标方向匹配度从高到低排序；技术岗可细分编程语言/框架/工具，非技术岗可细分专业能力/业务工具/行业知识/证书资质
-   示例规范：技术方向可写["Vue3 + Vite","TypeScript","Node.js Express"]；运营方向可写["用户增长","数据分析","活动策划"]；财务方向可写["财务分析","Excel建模","会计准则"]；不允许写"能力强"这类模糊词
+4. educations：教育经历数组，每项结构：
+   {"school":"学校名称","major":"专业","degree":"学历（本科/硕士）","start_date":"入学年月","end_date":"毕业年月"}
+   同时可保留扁平 school/major/education 与首条同步（兼容旧版）
+5. work_years, marital_status, height, weight, ethnicity, native_place, political_status, expected_salary：扩展基本信息，无则""
+6. custom_fields：自定义键值对数组，每项 {"label":"标签","value":"值"}，无则[]
+7. summary：个人简介，3-5句话，总字数80-150字；贴合目标岗位，突出匹配度、核心技术栈、工作年限、核心业务能力、个人优势
+8. skills：技能标签数组，拆分颗粒度细化，禁止笼统词汇；按与目标方向匹配度从高到低排序；技术岗可细分编程语言/框架/工具，非技术岗可细分专业能力/业务工具/行业知识/证书资质
 7. projects：项目经历数组，每一项严格包含子字段：
    {
      "name":"项目全称",

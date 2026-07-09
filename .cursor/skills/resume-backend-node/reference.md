@@ -112,6 +112,16 @@ task_type 示例：`resume_generate`, `project_optimize`, `jd_match`, `score`, `
 3. 费用按 `utils/ai_cost.js` + `ai_model` 表单价计算
 4. 余额不足：`402` + `code: INSUFFICIENT_BALANCE`
 
+## resume_json（AI 输出）
+
+扩展基本信息：`work_years`, `marital_status`, `height`, `weight`, `ethnicity`, `native_place`, `political_status`, `expected_salary`, `custom_fields: [{label,value}]`
+
+教育：`educations: [{school, major, degree, start_date, end_date}]`；扁平 `school/major/education` 与首条同步
+
+规范化：`services/ai/ai.service.js` → `normalizeEducations`, `normalizePdfResume`, `buildResumeContext`
+
+Prompt 字段说明：`services/ai/ai.prompts.js`
+
 ## 超级管理员初始化
 
 ```sql

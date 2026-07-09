@@ -91,6 +91,8 @@ POST /api/ai/match                 # JD 岗位匹配
 POST /api/ai/score                 # AI 简历评分
 ```
 
+AI 生成/懒解析/PDF 优化输出的 `resume_json` 支持扩展基本信息与 `educations[]` 教育数组（见 `services/ai/ai.prompts.js`）。`ai.service.js` 中 `normalizeEducations` / `normalizePdfResume` 负责兼容扁平 `school/major/education` 与多条教育记录。
+
 ### PDF 优化接口
 
 ```
