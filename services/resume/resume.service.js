@@ -4,7 +4,6 @@
  */
 
 const resumeRepo = require('../../repositories/resume.repository');
-const { PERMISSIONS, hasPermission } = require('../../utils/permissions');
 const { supabaseAdmin } = require('../../supabaseClient');
 
 // 每位用户最多可保存的简历数量
@@ -123,9 +122,6 @@ async function getResumeCount(userId) {
 }
 
 async function recordExport(user, resumeId) {
-  if (!hasPermission(user.role, PERMISSIONS.VIP_EXPORT)) {
-    throw Object.assign(new Error('普通用户暂不支持导出，请升级 VIP 后使用'), { statusCode: 403 });
-  }
   const { data: resume } = await resumeRepo.findById(user.id, resumeId);
   if (!resume) {
     throw Object.assign(new Error('简历不存在'), { statusCode: 404 });

@@ -75,9 +75,6 @@ async function updateUser(req) {
     payload.role = req.body.role;
   }
   if (req.body.status) payload.status = req.body.status;
-  if (Object.prototype.hasOwnProperty.call(req.body, 'vip_expire_time')) {
-    payload.vip_expire_time = req.body.vip_expire_time || null;
-  }
   if (req.body.nickname) payload.nickname = req.body.nickname;
   payload.update_time = new Date().toISOString();
 

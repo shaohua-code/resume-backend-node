@@ -259,6 +259,40 @@ create policy "service_role_all_user_feedback" on public.user_feedback
   for all to service_role using (true) with check (true);
 grant all privileges on table public.user_feedback to service_role;
 
+-- Token 计费：用户钱包与余额流水（详见 migrations/20260709_token_billing.sql）
+create table if not exists public.user_wallet (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  balance numeric(12, 4) not null default 0,
+  total_consumed numeric(12, 4) not null default 0,
+  update_time timestamptz default now()
+);
+
+create table if not exists public.balance_ledger (
+  id bigserial primary key,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  type text not null,
+  amount numeric(12, 4) not null,
+  balance_after numeric(12, 4) not null,
+  remark text default '',
+  operator_id uuid references auth.users(id) on delete set null,
+  ai_call_id bigint references public.ai_call_record(id) on delete set null,
+  create_time timestamptz default now()
+);
+
+insert into public.system_config (config_key, config_value, description)
+values
+  ('register_gift_amount', '{"amount": 10}'::jsonb, '新用户注册赠送额度（元）')
+on conflict (config_key) do nothing;
+
+grant all privileges on table public.user_wallet to service_role;
+grant all privileges on table public.balance_ledger to service_role;
+alter table public.user_wallet enable row level security;
+alter table public.balance_ledger enable row level security;
+drop policy if exists "service_role_all_user_wallet" on public.user_wallet;
+create policy "service_role_all_user_wallet" on public.user_wallet for all to service_role using (true) with check (true);
+drop policy if exists "service_role_all_balance_ledger" on public.balance_ledger;
+create policy "service_role_all_balance_ledger" on public.balance_ledger for all to service_role using (true) with check (true);
+
 -- 超级管理员初始化：先登录一次，再把下面邮箱替换成你的管理员邮箱执行
 -- update public.user_profile
 -- set role = 'SUPER_ADMIN', status = 'ACTIVE', update_time = now()

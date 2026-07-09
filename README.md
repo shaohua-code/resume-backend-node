@@ -47,7 +47,8 @@ resume-backend-node/
 
 | 目录 | 模块 | 说明 |
 |---|---|---|
-| `services/ai/` | AI 服务 | `ai.service.js` 调用 DeepSeek；`ai.prompts.js` 管理 Prompt；`ai.model.js` 管理任务常量与模型选择；`ai.quota.service.js` 管理调用配额与审计 |
+| `services/wallet/` | 钱包服务 | `wallet.service.js` 余额查询、扣费、注册赠送、管理员调额 |
+| `services/ai/` | AI 服务 | `ai.quota.service.js` 余额校验与扣费审计 |
 | `services/pdf/` | PDF 服务 | `pdf.service.js` 负责上传、解析、文本提取、文件元信息 |
 | `services/resume/` | 简历服务 | `resume.service.js` 处理简历 CRUD 业务 |
 | `services/auth/` | 认证服务 | `auth.service.js` 基于 Supabase Auth 实现 OTP、密码登录、刷新、密码重置 |
@@ -64,9 +65,19 @@ resume-backend-node/
 | `/api/ai` | `routers/ai.js` | AI 生成、分模块优化、JD 匹配、简历评分 |
 | `/api/pdf` | `routers/pdf.js` | PDF 上传、解析、AI 整体优化、文件管理 |
 | `/api/resume` | `routers/resume.js` | 简历 CRUD、导出记录 |
-| `/api/admin` | `routers/admin.js` | 管理后台：用户、订单、AI 调用、简历、配置、反馈等 |
+| `/api/wallet` | `routers/wallet.js` | 用户余额与流水 |
+| `/api/admin` | `routers/admin.js` | 管理后台：用户、额度、AI 调用、简历、配置、反馈等 |
 | `/api/upload` | `routers/upload.js` | 通用文件上传 |
 | `/api/feedback` | `routers/feedback.js` | 用户反馈 |
+
+### 钱包接口
+
+```
+GET  /api/wallet/balance           # 当前用户余额
+GET  /api/wallet/ledger            # 流水列表
+POST /api/admin/users/:id/balance  # 调整额度 { amount, remark }
+GET  /api/admin/wallets            # 管理端钱包列表
+```
 
 ### AI 优化接口
 
@@ -169,4 +180,6 @@ supabase/schema.sql
 - 控制器层统一使用 `utils/response.js` 的 `success`/`error` 返回。
 - Service 层处理业务规则，Repository 层只操作数据库。
 - 所有导出函数均添加中文 JSDoc 注释。
-- AI 调用统一经过 `services/ai/ai.quota.service.js` 校验配额并记录审计日志。
+- AI 调用统一经过 `services/ai/ai.quota.service.js` 校验余额并在成功后扣费、记录审计日志。
+- 新用户注册在 `user_profile_service.js` 中自动初始化钱包并写入 `REGISTER_GIFT` 流水。
+- 计费与权限详见项目根目录 [`AI简历助手-项目全功能说明.md`](../AI简历助手-项目全功能说明.md)。

@@ -13,7 +13,6 @@
 
 const express = require('express');
 const { authRequired } = require('../middlewares/auth');
-const { PERMISSIONS, hasPermission } = require('../utils/permissions');
 const { validate } = require('../middlewares/validate');
 const resumeController = require('../controllers/resume.controller');
 const resumeValidator = require('../validators/resume.validator');
@@ -81,12 +80,6 @@ router.get('/count', resumeController.count);
  * 记录导出操作接口
  * POST /api/resume/export
  */
-router.post('/export', resumeValidator.recordExport, validate, (req, res, next) => {
-  // 导出权限校验：仅 VIP 可导出
-  if (!hasPermission(req.user.role, PERMISSIONS.VIP_EXPORT)) {
-    return res.status(403).json({ detail: '普通用户暂不支持导出，请升级 VIP 后使用' });
-  }
-  next();
-}, resumeController.recordExport);
+router.post('/export', resumeValidator.recordExport, validate, resumeController.recordExport);
 
 module.exports = router;

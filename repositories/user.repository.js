@@ -38,9 +38,9 @@ async function listUsers({ from, to, role, status, keyword, adminRole }) {
     .order('create_time', { ascending: false })
     .range(from, to);
 
-  // 普通管理员只能查看普通用户和 VIP 用户
+  // 普通管理员只能查看普通用户
   if (adminRole === ROLES.ADMIN) {
-    query = query.in('role', [ROLES.USER, ROLES.VIP]);
+    query = query.eq('role', ROLES.USER);
   }
 
   if (role) query = query.eq('role', role);

@@ -84,7 +84,6 @@ router.post(
         user_id: user.id,
         role: profile.role,
         status: profile.status,
-        vip_expire_time: profile.vip_expire_time,
         permissions: profile.permissions,
       });
     } catch (e) {
@@ -144,7 +143,6 @@ router.post(
         user_id: user.id,
         role: profile.role,
         status: profile.status,
-        vip_expire_time: profile.vip_expire_time,
         permissions: profile.permissions,
       });
     } catch (e) {
@@ -205,7 +203,6 @@ router.post(
         user_id: user.id,
         role: profile.role,
         status: profile.status,
-        vip_expire_time: profile.vip_expire_time,
         permissions: profile.permissions,
       });
     } catch (e) {
@@ -245,7 +242,6 @@ router.post(
         expires_at: session.expires_at,
         role: profile ? profile.role : undefined,
         status: profile ? profile.status : undefined,
-        vip_expire_time: profile ? profile.vip_expire_time : undefined,
         permissions: profile ? profile.permissions : undefined,
       });
     } catch (e) {

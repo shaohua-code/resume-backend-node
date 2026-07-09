@@ -5,12 +5,12 @@
 
 const dashboardService = require('../services/admin/admin.dashboard.service');
 const userService = require('../services/admin/admin.user.service');
-const orderService = require('../services/admin/admin.order.service');
 const aiCallService = require('../services/admin/admin.aiCall.service');
 const resumeService = require('../services/admin/admin.resume.service');
 const configService = require('../services/admin/admin.config.service');
 const crudService = require('../services/admin/admin.crud.service');
 const feedbackService = require('../services/admin/admin.feedback.service');
+const walletService = require('../services/wallet/wallet.service');
 
 /**
  * 解析分页参数
@@ -113,49 +113,6 @@ async function resetPassword(req, res) {
   try {
     const data = await userService.resetPassword(req);
     return res.json({ success: true, data, message: '重置链接已生成' });
-  } catch (err) {
-    return handleError(res, err);
-  }
-}
-
-/**
- * 获取订单列表
- * @param {Object} req - Express 请求对象
- * @param {Object} res - Express 响应对象
- */
-async function listOrders(req, res) {
-  try {
-    const { from, to } = parsePagination(req);
-    const result = await orderService.listOrders(req, from, to);
-    return res.json({ success: true, total: result.total, items: result.items });
-  } catch (err) {
-    return handleError(res, err);
-  }
-}
-
-/**
- * 创建订单
- * @param {Object} req - Express 请求对象
- * @param {Object} res - Express 响应对象
- */
-async function createOrder(req, res) {
-  try {
-    const data = await orderService.createOrder(req);
-    return res.json({ success: true, data, message: '订单已创建' });
-  } catch (err) {
-    return handleError(res, err);
-  }
-}
-
-/**
- * 更新订单
- * @param {Object} req - Express 请求对象
- * @param {Object} res - Express 响应对象
- */
-async function updateOrder(req, res) {
-  try {
-    const data = await orderService.updateOrder(req);
-    return res.json({ success: true, data, message: '订单已更新' });
   } catch (err) {
     return handleError(res, err);
   }
@@ -335,6 +292,31 @@ async function getFeedback(req, res) {
   }
 }
 
+/**
+ * 调整用户额度
+ */
+async function adjustUserBalance(req, res) {
+  try {
+    const data = await walletService.adjustBalanceFromRequest(req);
+    return res.json({ success: true, data, message: '额度已调整' });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+/**
+ * 获取用户钱包列表
+ */
+async function listWallets(req, res) {
+  try {
+    const { from, to } = parsePagination(req);
+    const result = await walletService.listWalletsForAdmin(req, from, to);
+    return res.json({ success: true, total: result.total, items: result.items });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
 module.exports = {
   getStats,
   getDashboard,
@@ -342,9 +324,8 @@ module.exports = {
   getUser,
   updateUser,
   resetPassword,
-  listOrders,
-  createOrder,
-  updateOrder,
+  adjustUserBalance,
+  listWallets,
   listAiCalls,
   listResumes,
   getResume,

@@ -5,6 +5,7 @@
 
 const { supabaseAdmin } = require('../supabaseClient');
 const { getEffectiveRole, getRolePermissions } = require('../utils/permissions');
+const { initWalletForNewUser } = require('./wallet/wallet.service');
 
 function buildProfilePayload(user) {
   const metadata = user.user_metadata || {};
@@ -73,6 +74,8 @@ async function ensureUserProfile(user) {
     .select()
     .single();
   if (error) throw error;
+  // 新用户注册成功后自动创建钱包并赠送额度
+  await initWalletForNewUser(user.id);
   return attachPermissionInfo(data);
 }
 
