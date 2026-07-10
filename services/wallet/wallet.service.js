@@ -121,6 +121,26 @@ async function getQuotaPool(adminId, role) {
 }
 
 /**
+ * 获取可用于 AI 消费的余额
+ * 普通用户：钱包余额；管理员/超管：钱包余额 + 额度池剩余可分配
+ * @param {string} userId
+ * @param {string} [role='USER']
+ */
+async function getAiSpendableBalance(userId, role = ROLES.USER) {
+  let wallet = await getWalletOrNull(userId)
+  if (!wallet && role === ROLES.USER) {
+    wallet = await initWalletForNewUser(userId)
+  }
+  const walletBalance = roundMoney(wallet?.balance || 0)
+
+  if (role === ROLES.ADMIN || role === ROLES.SUPER_ADMIN) {
+    const pool = await getQuotaPool(userId, role)
+    return roundMoney(walletBalance + pool.available)
+  }
+  return walletBalance
+}
+
+/**
  * 新用户注册后初始化钱包并写入注册赠送流水
  * 注册赠送金额从超级管理员总额度池扣减
  * @param {string} userId
@@ -236,22 +256,24 @@ async function ensureTargetWallet(targetProfile) {
  * @param {string} [role='USER']
  */
 async function getBalance(userId, role = ROLES.USER) {
-  // 管理员角色：展示额度池可分配余额，而非 user_wallet（分配额度池后钱包余额仍为 0）
+  // 管理员：账户余额 = 钱包余额 + 额度池剩余（与 AI 扣费校验一致）
   if (role === ROLES.ADMIN || role === ROLES.SUPER_ADMIN) {
     const pool = await getQuotaPool(userId, role)
     let wallet = await getWalletOrNull(userId)
     if (!wallet) {
       wallet = await ensureWalletRecord(userId)
     }
+    const walletBalance = roundMoney(wallet.balance)
+    const spendable = roundMoney(walletBalance + pool.available)
     return {
-      balance: pool.available,
+      balance: spendable,
       total_consumed: roundMoney(wallet.total_consumed),
       update_time: wallet.update_time || pool.update_time,
       quota_mode: true,
       total_quota: pool.total_quota,
       allocated_quota: pool.allocated_quota,
       available_quota: pool.available,
-      wallet_balance: roundMoney(wallet.balance),
+      wallet_balance: walletBalance,
     }
   }
 
@@ -352,9 +374,10 @@ async function changeBalance({ userId, delta, type, remark, operatorId = null, a
  * AI 调用前校验余额是否足够
  * @param {string} userId
  * @param {number} [estimatedCost=MIN_AI_BALANCE]
+ * @param {string} [role='USER']
  */
-async function ensureSufficientBalance(userId, estimatedCost = MIN_AI_BALANCE) {
-  const { balance } = await getBalance(userId)
+async function ensureSufficientBalance(userId, estimatedCost = MIN_AI_BALANCE, role = ROLES.USER) {
+  const balance = await getAiSpendableBalance(userId, role)
   if (balance < estimatedCost) {
     const err = new Error(`账户余额不足（当前 ¥${balance.toFixed(2)}），请先充值或联系管理员`)
     err.code = 'INSUFFICIENT_BALANCE'
@@ -364,27 +387,90 @@ async function ensureSufficientBalance(userId, estimatedCost = MIN_AI_BALANCE) {
 }
 
 /**
+ * 从额度池扣减 AI 消费（管理员钱包不足时）
+ * @param {string} userId
+ * @param {string} role
+ * @param {number} amount
+ * @param {number} aiCallId
+ * @param {string} taskType
+ */
+async function deductFromQuotaPoolForAi(userId, role, amount, aiCallId, taskType) {
+  const deductAmount = roundMoney(amount)
+  const pool = await getQuotaPool(userId, role)
+  if (pool.available < deductAmount) {
+    const err = new Error('账户余额不足，请先充值或联系管理员')
+    err.code = 'INSUFFICIENT_BALANCE'
+    err.statusCode = 402
+    throw err
+  }
+
+  await walletRepo.updateQuotaPool(userId, {
+    allocated_quota: roundMoney(pool.allocated_quota + deductAmount),
+    update_time: new Date().toISOString(),
+  })
+
+  // 写入流水（不改变钱包余额）
+  await ensureWalletRecord(userId)
+  const wallet = await getWalletOrNull(userId)
+  const walletBalance = roundMoney(wallet?.balance || 0)
+  await walletRepo.insertLedger({
+    user_id: userId,
+    type: LEDGER_TYPES.AI_CONSUME,
+    amount: -deductAmount,
+    balance_after: walletBalance,
+    remark: `AI 消费（额度池）：${taskType}`,
+    ai_call_id: aiCallId,
+    paid_amount: 0,
+    create_time: new Date().toISOString(),
+  })
+}
+
+/**
  * AI 调用成功后按实际费用扣费
  * @param {string} userId
  * @param {number} cost
  * @param {number} aiCallId
  * @param {string} taskType
+ * @param {string} [role='USER']
  */
-async function deductForAiCall(userId, cost, aiCallId, taskType) {
+async function deductForAiCall(userId, cost, aiCallId, taskType, role = ROLES.USER) {
   const actualCost = roundMoney(cost)
   if (actualCost <= 0) {
-    return { balance: (await getBalance(userId)).balance, deducted: 0 }
+    return { balance: await getAiSpendableBalance(userId, role), deducted: 0 }
   }
 
-  const result = await changeBalance({
-    userId,
-    delta: -actualCost,
-    type: LEDGER_TYPES.AI_CONSUME,
-    remark: `AI 消费：${taskType}`,
-    aiCallId,
-  })
+  let remaining = actualCost
+  const wallet = await getWalletOrNull(userId)
 
-  return { balance: result.balance, deducted: actualCost }
+  // 优先扣钱包余额
+  const walletBalance = roundMoney(wallet?.balance || 0)
+  if (walletBalance > 0 && remaining > 0) {
+    const fromWallet = Math.min(walletBalance, remaining)
+    await changeBalance({
+      userId,
+      delta: -fromWallet,
+      type: LEDGER_TYPES.AI_CONSUME,
+      remark: `AI 消费：${taskType}`,
+      aiCallId,
+    })
+    remaining = roundMoney(remaining - fromWallet)
+  }
+
+  // 管理员钱包不足时，从额度池扣减
+  if (remaining > 0) {
+    if (role !== ROLES.ADMIN && role !== ROLES.SUPER_ADMIN) {
+      const err = new Error('账户余额不足，请先充值或联系管理员')
+      err.code = 'INSUFFICIENT_BALANCE'
+      err.statusCode = 402
+      throw err
+    }
+    await deductFromQuotaPoolForAi(userId, role, remaining, aiCallId, taskType)
+  }
+
+  return {
+    balance: await getAiSpendableBalance(userId, role),
+    deducted: actualCost,
+  }
 }
 
 /**

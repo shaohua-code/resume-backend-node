@@ -16,6 +16,7 @@ async function ensureAiQuota(req, taskType, estimatedCost) {
   await walletService.ensureSufficientBalance(
     req.user.id,
     estimatedCost || walletService.MIN_AI_BALANCE,
+    req.user.role,
   )
 }
 
@@ -57,7 +58,7 @@ async function recordAiCall(req, taskType, model, success, errorMessage = '', me
   // 仅成功调用且费用大于 0 时扣减余额
   if (success && cost > 0 && callRecord?.id) {
     try {
-      await walletService.deductForAiCall(req.user.id, cost, callRecord.id, taskType)
+      await walletService.deductForAiCall(req.user.id, cost, callRecord.id, taskType, req.user.role)
     } catch (deductErr) {
       console.error('[recordAiCall] deduct failed:', deductErr.message, { taskType, cost })
     }

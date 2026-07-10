@@ -20,6 +20,40 @@ function setupSSE(res) {
   return (payload) => res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
+/** 统一处理 AI 接口错误，余额不足不重复加前缀 */
+function respondAiError(res, e, { sendEvent, recordFn } = {}) {
+  if (recordFn) recordFn(e.message);
+
+  if (e.code === 'AI_LIMIT_EXCEEDED') {
+    if (sendEvent) {
+      sendEvent({ error: e.message, code: e.code });
+      return res.end();
+    }
+    return error(res, 403, e.message);
+  }
+  if (e.code === 'INSUFFICIENT_BALANCE') {
+    if (sendEvent) {
+      sendEvent({ error: e.message, code: e.code });
+      return res.end();
+    }
+    return error(res, 402, e.message, { code: e.code });
+  }
+  if (e.code === 'CONFIG_MISSING') {
+    if (sendEvent) {
+      sendEvent({ error: e.message, code: e.code });
+      return res.end();
+    }
+    return error(res, 400, e.message);
+  }
+
+  const msg = `AI服务调用失败：${e.message}`;
+  if (sendEvent) {
+    sendEvent({ error: msg });
+    return res.end();
+  }
+  return error(res, e.statusCode || 500, msg);
+}
+
 async function getResumeJson(req, resumeId) {
   const { data: resume, error: err } = await resumeRepo.findById(req.user.id, resumeId);
   if (err || !resume) {
@@ -45,14 +79,9 @@ async function generate(req, res) {
     await recordAiCall(req, taskType, model, true, '', meta);
     return success(res, data);
   } catch (e) {
-    if (e.code === 'AI_LIMIT_EXCEEDED') {
-      return error(res, 403, e.message);
-    }
-    await recordAiCall(req, taskType, model, false, e.message);
-    if (e.code === 'CONFIG_MISSING') {
-      return error(res, 400, e.message);
-    }
-    return error(res, 500, `AI服务调用失败：${e.message}`);
+    return respondAiError(res, e, {
+      recordFn: (msg) => recordAiCall(req, taskType, model, false, msg),
+    });
   }
 }
 
@@ -78,17 +107,10 @@ async function generateStream(req, res) {
     sendEvent({ done: true, data });
     return res.end();
   } catch (e) {
-    if (e.code === 'AI_LIMIT_EXCEEDED') {
-      sendEvent({ error: e.message, code: 'AI_LIMIT_EXCEEDED' });
-      return res.end();
-    }
-    await recordAiCall(req, taskType, model, false, e.message);
-    if (e.code === 'CONFIG_MISSING') {
-      sendEvent({ error: e.message, code: 'CONFIG_MISSING' });
-      return res.end();
-    }
-    sendEvent({ error: `AI服务调用失败：${e.message}` });
-    return res.end();
+    return respondAiError(res, e, {
+      sendEvent,
+      recordFn: (msg) => recordAiCall(req, taskType, model, false, msg),
+    });
   }
 }
 
@@ -109,14 +131,9 @@ async function optimize(req, res) {
     await recordAiCall(req, taskType, model, true, '', meta);
     return success(res, data);
   } catch (e) {
-    if (e.code === 'AI_LIMIT_EXCEEDED') {
-      return error(res, 403, e.message);
-    }
-    await recordAiCall(req, taskType, model, false, e.message);
-    if (e.code === 'CONFIG_MISSING') {
-      return error(res, 400, e.message);
-    }
-    return error(res, 500, `AI服务调用失败：${e.message}`);
+    return respondAiError(res, e, {
+      recordFn: (msg) => recordAiCall(req, taskType, model, false, msg),
+    });
   }
 }
 
@@ -179,17 +196,10 @@ async function optimizeStream(req, res) {
     sendEvent({ done: true, data: serviceResult.data });
     return res.end();
   } catch (e) {
-    if (e.code === 'AI_LIMIT_EXCEEDED') {
-      sendEvent({ error: e.message, code: 'AI_LIMIT_EXCEEDED' });
-      return res.end();
-    }
-    await recordAiCall(req, taskType, model, false, e.message);
-    if (e.code === 'CONFIG_MISSING') {
-      sendEvent({ error: e.message, code: 'CONFIG_MISSING' });
-      return res.end();
-    }
-    sendEvent({ error: `AI服务调用失败：${e.message}` });
-    return res.end();
+    return respondAiError(res, e, {
+      sendEvent,
+      recordFn: (msg) => recordAiCall(req, taskType, model, false, msg),
+    });
   }
 }
 
@@ -204,11 +214,9 @@ async function matchJd(req, res) {
     await recordAiCall(req, taskType, model, true, '', meta);
     return success(res, matchData, '匹配分析完成');
   } catch (e) {
-    if (e.code === 'AI_LIMIT_EXCEEDED') {
-      return error(res, 403, e.message);
-    }
-    await recordAiCall(req, taskType, model, false, e.message);
-    return error(res, e.statusCode || 500, `AI服务调用失败：${e.message}`);
+    return respondAiError(res, e, {
+      recordFn: (msg) => recordAiCall(req, taskType, model, false, msg),
+    });
   }
 }
 
@@ -223,11 +231,9 @@ async function score(req, res) {
     await recordAiCall(req, taskType, model, true, '', meta);
     return success(res, scoreData, '评分完成');
   } catch (e) {
-    if (e.code === 'AI_LIMIT_EXCEEDED') {
-      return error(res, 403, e.message);
-    }
-    await recordAiCall(req, taskType, model, false, e.message);
-    return error(res, e.statusCode || 500, `AI服务调用失败：${e.message}`);
+    return respondAiError(res, e, {
+      recordFn: (msg) => recordAiCall(req, taskType, model, false, msg),
+    });
   }
 }
 
