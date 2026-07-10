@@ -407,31 +407,161 @@ async function refundAiCall(userId, cost, remark = 'AI 调用失败退款') {
 }
 
 /**
+ * 将额度退回超级管理员额度池（减少 allocated_quota，可用额度增加）
+ * @param {string} superAdminId
+ * @param {number} amount
+ */
+async function releaseSuperAdminQuota(superAdminId, amount) {
+  const releaseAmount = roundMoney(amount)
+  if (releaseAmount <= 0) return
+  const superPool = await getQuotaPool(superAdminId, ROLES.SUPER_ADMIN)
+  await walletRepo.updateQuotaPool(superAdminId, {
+    allocated_quota: roundMoney(Math.max(0, superPool.allocated_quota - releaseAmount)),
+    update_time: new Date().toISOString(),
+  })
+}
+
+/**
+ * 记录管理员额度池流水（不改变 user_wallet 余额）
+ */
+async function recordAdminPoolLedger(userId, delta, type, remark, operatorId, paidAmount) {
+  await ensureWalletRecord(userId)
+  const beforeWallet = await getWalletOrNull(userId)
+  const beforeBalance = beforeWallet ? Number(beforeWallet.balance) : 0
+  await changeBalance({
+    userId,
+    delta,
+    type,
+    remark,
+    operatorId,
+    paidAmount,
+  })
+  await walletRepo.updateWallet(userId, {
+    balance: roundMoney(beforeBalance),
+    update_time: new Date().toISOString(),
+  })
+}
+
+/**
+ * 超级管理员扣减用户或管理员额度，并退回自身额度池
+ */
+async function deductBySuperAdmin(operator, target, amount, remark, paidAmount) {
+  const deductAmount = roundMoney(amount)
+  if (deductAmount <= 0) {
+    throw Object.assign(new Error('扣减金额必须为正数'), { statusCode: 400 })
+  }
+
+  // 扣减普通用户余额
+  if (target.role === ROLES.USER) {
+    await ensureTargetWallet(target)
+    const wallet = await getWalletOrNull(target.user_id)
+    const currentBalance = roundMoney(wallet?.balance || 0)
+    if (currentBalance < deductAmount) {
+      throw Object.assign(new Error(`用户余额不足（当前 ¥${currentBalance.toFixed(2)}）`), { statusCode: 402 })
+    }
+
+    const result = await changeBalance({
+      userId: target.user_id,
+      delta: -deductAmount,
+      type: LEDGER_TYPES.ADMIN_DEDUCT,
+      remark,
+      operatorId: operator.id,
+      paidAmount,
+    })
+
+    // 扣减用户额度后，退回超管可分配额度池
+    await releaseSuperAdminQuota(operator.id, deductAmount)
+
+    return {
+      user_id: target.user_id,
+      balance: result.balance,
+      amount: -deductAmount,
+      paid_amount: paidAmount,
+    }
+  }
+
+  // 扣减管理员额度池（仅可回收未分配给其用户的部分）
+  if (target.role === ROLES.ADMIN) {
+    const targetPool = await ensureQuotaPool(target.user_id, target.role)
+    const poolTotal = roundMoney(targetPool.total_quota || 0)
+    const poolAllocated = roundMoney(targetPool.allocated_quota || 0)
+    const reclaimable = roundMoney(poolTotal - poolAllocated)
+    if (deductAmount > reclaimable) {
+      throw Object.assign(
+        new Error(`管理员额度池可扣减不足（最多 ¥${reclaimable.toFixed(2)}）`),
+        { statusCode: 402 },
+      )
+    }
+
+    const newTotal = roundMoney(poolTotal - deductAmount)
+    await walletRepo.updateQuotaPool(target.user_id, {
+      total_quota: newTotal,
+      update_time: new Date().toISOString(),
+    })
+
+    await recordAdminPoolLedger(
+      target.user_id,
+      -deductAmount,
+      LEDGER_TYPES.ADMIN_DEDUCT,
+      remark,
+      operator.id,
+      paidAmount,
+    )
+
+    // 退回超管额度池
+    await releaseSuperAdminQuota(operator.id, deductAmount)
+
+    return {
+      user_id: target.user_id,
+      total_quota: newTotal,
+      amount: -deductAmount,
+      paid_amount: paidAmount,
+    }
+  }
+
+  throw Object.assign(new Error('仅可扣减普通用户或管理员额度'), { statusCode: 403 })
+}
+
+/**
  * 管理员调整用户额度（额度池分配体系）
  * - 超级管理员给管理员分配额度池：ADMIN_POOL_GRANT
  * - 超级管理员给用户分配额度：ADMIN_GRANT（从总额度池扣减）
+ * - 超级管理员扣减用户/管理员额度：ADMIN_DEDUCT（退回超管额度池）
  * - 普通管理员给归属用户分配额度：ADMIN_ALLOCATE（从自身额度池扣减）
  * @param {Object} operator - 操作者 req.user
  * @param {string} targetUserId
- * @param {number} amount - 分配金额（正数）
- * @param {string} remark
+ * @param {number} amount - 正数增加，负数扣减（仅超管）
+ * @param {string} remark - 备注（必填）
  * @param {number} paidAmount - 实付金额（必填，>=0）
  */
 async function adjustBalanceByAdmin(operator, targetUserId, amount, remark = '', paidAmount = 0) {
   const delta = roundMoney(amount)
-  if (!delta || delta <= 0) {
-    throw Object.assign(new Error('分配金额必须为正数'), { statusCode: 400 })
+  if (!delta || Number.isNaN(delta)) {
+    throw Object.assign(new Error('调整金额不能为空或 0'), { statusCode: 400 })
   }
 
-  // 实付金额校验
+  const remarkText = String(remark || '').trim()
+  if (!remarkText) {
+    throw Object.assign(new Error('备注不能为空'), { statusCode: 400 })
+  }
+
   const paid = roundMoney(paidAmount)
   if (Number.isNaN(paid) || paid < 0) {
-    throw Object.assign(new Error('实付金额不能为空且必须 >= 0'), { statusCode: 400 })
+    throw Object.assign(new Error('实付金额必填且必须 >= 0'), { statusCode: 400 })
   }
 
   const { data: target } = await userRepo.findById(targetUserId)
   if (!target) {
     throw Object.assign(new Error('用户不存在'), { statusCode: 404 })
+  }
+
+  // 超级管理员扣减额度
+  if (operator.role === ROLES.SUPER_ADMIN && delta < 0) {
+    return deductBySuperAdmin(operator, target, Math.abs(delta), remarkText, paid)
+  }
+
+  if (delta <= 0) {
+    throw Object.assign(new Error('分配金额必须为正数'), { statusCode: 400 })
   }
 
   // 普通管理员只能给归属用户分配额度
@@ -443,7 +573,7 @@ async function adjustBalanceByAdmin(operator, targetUserId, amount, remark = '',
     if (!hasAccess) {
       throw Object.assign(new Error('无权操作该用户，仅可操作归属用户'), { statusCode: 403 })
     }
-    return allocateFromAdminPool(operator, target, delta, remark, paid)
+    return allocateFromAdminPool(operator, target, delta, remarkText, paid)
   }
 
   // 超级管理员
@@ -453,7 +583,7 @@ async function adjustBalanceByAdmin(operator, targetUserId, amount, remark = '',
 
   // 场景 A：超管给管理员分配额度池
   if (target.role === ROLES.ADMIN) {
-    return grantAdminPoolFromSuperAdmin(operator, target, delta, remark, paid)
+    return grantAdminPoolFromSuperAdmin(operator, target, delta, remarkText, paid)
   }
 
   // 场景 B：超管给用户分配额度
@@ -474,7 +604,7 @@ async function adjustBalanceByAdmin(operator, targetUserId, amount, remark = '',
     userId: targetUserId,
     delta,
     type: LEDGER_TYPES.ADMIN_GRANT,
-    remark: remark || '超级管理员分配额度',
+    remark: remarkText || '超级管理员分配额度',
     operatorId: operator.id,
     paidAmount: paid,
   })
