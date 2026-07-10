@@ -25,8 +25,23 @@ router.patch('/users/:userId', requirePermission(PERMISSIONS.ADMIN_MANAGE_USERS)
 router.post('/users/:userId/reset-password', requirePermission(PERMISSIONS.ADMIN_MANAGE_USERS), adminController.resetPassword)
 router.post('/users/:userId/balance', requirePermission(PERMISSIONS.ADMIN_WALLET), adminController.adjustUserBalance)
 
+// 邮箱认领用户
+router.post('/users/claim', requirePermission(PERMISSIONS.ADMIN_CLAIM_USERS), adminController.claimUser)
+
 // 用户额度管理
 router.get('/wallets', requirePermission(PERMISSIONS.ADMIN_WALLET), adminController.listWallets)
+
+// 额度池摘要
+router.get('/quota-pool/summary', requirePermission(PERMISSIONS.ADMIN_WALLET), adminController.getQuotaPoolSummary)
+
+// 消费记录
+router.get('/ledgers', requirePermission(PERMISSIONS.ADMIN_VIEW_LEDGERS), adminController.listLedgers)
+
+// 邀请链接管理
+router.get('/invite-links', requirePermission(PERMISSIONS.ADMIN_MANAGE_INVITE_LINKS), adminController.listInviteLinks)
+router.post('/invite-links', requirePermission(PERMISSIONS.ADMIN_MANAGE_INVITE_LINKS), adminController.createInviteLink)
+router.patch('/invite-links/:id', requirePermission(PERMISSIONS.ADMIN_MANAGE_INVITE_LINKS), adminController.updateInviteLink)
+router.delete('/invite-links/:id', requirePermission(PERMISSIONS.ADMIN_MANAGE_INVITE_LINKS), adminController.deleteInviteLink)
 
 // AI 调用记录
 router.get('/ai-calls', requirePermission(PERMISSIONS.ADMIN_VIEW_AI_CALLS), adminController.listAiCalls)

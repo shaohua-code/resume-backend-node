@@ -11,6 +11,8 @@ const configService = require('../services/admin/admin.config.service');
 const crudService = require('../services/admin/admin.crud.service');
 const feedbackService = require('../services/admin/admin.feedback.service');
 const walletService = require('../services/wallet/wallet.service');
+const ledgerService = require('../services/admin/admin.ledger.service');
+const inviteService = require('../services/admin/admin.invite.service');
 
 /**
  * 解析分页参数
@@ -322,6 +324,91 @@ async function listWallets(req, res) {
   }
 }
 
+/**
+ * 获取消费记录列表
+ */
+async function listLedgers(req, res) {
+  try {
+    const { from, to } = parsePagination(req);
+    const result = await ledgerService.listLedgers(req, from, to);
+    return res.json({ success: true, total: result.total, items: result.items });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+/**
+ * 通过邮箱认领用户
+ */
+async function claimUser(req, res) {
+  try {
+    const data = await userService.claimUser(req);
+    return res.json({ success: true, data, message: '认领成功' });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+/**
+ * 获取邀请链接列表
+ */
+async function listInviteLinks(req, res) {
+  try {
+    const result = await inviteService.listInviteLinks(req);
+    return res.json({ success: true, items: result.items });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+/**
+ * 创建邀请链接
+ */
+async function createInviteLink(req, res) {
+  try {
+    const data = await inviteService.createInviteLink(req);
+    return res.json({ success: true, data, message: '邀请链接已生成' });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+/**
+ * 更新邀请链接
+ */
+async function updateInviteLink(req, res) {
+  try {
+    const data = await inviteService.updateInviteLink(req);
+    return res.json({ success: true, data, message: '邀请链接已更新' });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+/**
+ * 删除邀请链接
+ */
+async function deleteInviteLink(req, res) {
+  try {
+    await inviteService.deleteInviteLink(req);
+    return res.json({ success: true, message: '邀请链接已删除' });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+/**
+ * 获取当前管理员额度池摘要
+ */
+async function getQuotaPoolSummary(req, res) {
+  try {
+    const data = await walletService.getQuotaPoolSummary(req);
+    return res.json({ success: true, data });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
 module.exports = {
   getStats,
   getDashboard,
@@ -342,4 +429,12 @@ module.exports = {
   deleteCrudItem,
   listFeedbacks,
   getFeedback,
+  // 新增导出
+  listLedgers,
+  claimUser,
+  listInviteLinks,
+  createInviteLink,
+  updateInviteLink,
+  deleteInviteLink,
+  getQuotaPoolSummary,
 };

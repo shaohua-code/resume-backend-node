@@ -4,17 +4,24 @@
  */
 
 const resumeRepo = require('../../repositories/resume.repository');
-const { attachUserProfiles } = require('./admin.common.service');
+const { attachUserProfiles, getOwnedUserIds, canAccessUser } = require('./admin.common.service');
 
 /**
  * 分页查询简历列表
+ * 普通管理员仅返回归属用户的简历；超级管理员返回全部
  * @param {Object} req - Express 请求对象
  * @param {number} from - 起始索引
  * @param {number} to - 结束索引
  * @returns {Promise<Object>} 简历列表结果 { total, items }
  */
 async function listResumes(req, from, to) {
-  const { data, error, count } = await resumeRepo.listAdmin(from, to, req.query.user_id);
+  const ownedUserIds = await getOwnedUserIds(req.user)
+  const { data, error, count } = await resumeRepo.listAdmin({
+    from,
+    to,
+    userId: req.query.user_id,
+    userIds: ownedUserIds,
+  })
 
   if (error) {
     throw Object.assign(new Error(`查询简历失败：${error.message}`), { statusCode: 500 });
@@ -26,6 +33,7 @@ async function listResumes(req, from, to) {
 
 /**
  * 查询单份简历详情
+ * 普通管理员仅能查看归属用户的简历
  * @param {Object} req - Express 请求对象
  * @returns {Promise<Object>} 简历详情
  */
@@ -34,6 +42,11 @@ async function getResume(req) {
 
   if (error || !data) {
     throw Object.assign(new Error('简历不存在'), { statusCode: 404 });
+  }
+
+  const hasAccess = await canAccessUser(req.user, data.user_id)
+  if (!hasAccess) {
+    throw Object.assign(new Error('无权查看该简历'), { statusCode: 403 });
   }
 
   return data;

@@ -109,14 +109,24 @@ async function findOldestByUser(userId) {
     .single();
 }
 
-async function listAdmin(from, to, userId) {
+async function listAdmin({ from, to, userId, userIds }) {
   let query = supabaseAdmin
     .from('resume')
     .select('id,user_id,title,template_id,score,create_time,update_time', { count: 'exact' })
     .order('update_time', { ascending: false })
-    .range(from, to);
-  if (userId) query = query.eq('user_id', userId);
-  return query;
+    .range(from, to)
+
+  // 普通管理员：仅查询归属用户简历；超管传 null 不过滤
+  if (userIds !== undefined && userIds !== null) {
+    if (!userIds.length) {
+      query = query.eq('user_id', '00000000-0000-0000-0000-000000000000')
+    } else {
+      query = query.in('user_id', userIds)
+    }
+  }
+
+  if (userId) query = query.eq('user_id', userId)
+  return query
 }
 
 module.exports = {

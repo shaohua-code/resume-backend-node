@@ -22,6 +22,7 @@ const {
   isUsernameTaken,
 } = require('../services/auth/auth.service');
 const { ensureUserProfile, getUserProfile } = require('../services/user_profile_service');
+const inviteService = require('../services/admin/admin.invite.service');
 
 const router = express.Router();
 
@@ -112,17 +113,20 @@ router.post(
       .isLength({ min: 2, max: 32 })
       .matches(/^[a-zA-Z0-9_\-\u4e00-\u9fa5]+$/)
       .withMessage('用户名仅支持中英文/数字/下划线/中划线，长度 2-32'),
+    body('invite_code').optional().isString(),
   ],
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ detail: errors.array()[0].msg });
     }
-    const { email, code, password, username } = req.body;
+    const { email, code, password, username, invite_code } = req.body;
     try {
       if (await isUsernameTaken(username)) {
         return res.status(409).json({ detail: '该用户名已被占用，请更换用户名' });
       }
+      // 校验邀请码（可选）
+      const inviteAdminId = invite_code ? await inviteService.validateInviteCode(invite_code) : null;
       // 先校验邮箱验证码，确保注册前邮箱已验证
       const verified = await verifyOtp(email, code);
       const existingProfile = await getUserProfile(verified.user.id);
@@ -131,6 +135,18 @@ router.post(
       }
       const user = await setPasswordAfterEmailVerified(verified.user.id, password, username);
       const profile = await ensureUserProfile(user);
+
+      // 注册成功后绑定归属关系（若有有效邀请码）
+      if (inviteAdminId) {
+        try {
+          await inviteService.bindUserRelation(user.id, inviteAdminId);
+          await inviteService.incrementUsedCount(invite_code);
+        } catch (bindErr) {
+          // 绑定失败不阻断注册流程，仅记录
+          console.error('绑定邀请归属失败：', bindErr.message);
+        }
+      }
+
       return res.json({
         success: true,
         need_verify: false,

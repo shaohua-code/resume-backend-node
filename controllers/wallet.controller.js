@@ -24,7 +24,7 @@ function handleError(res, err) {
  */
 async function getBalance(req, res) {
   try {
-    const data = await walletService.getBalance(req.user.id)
+    const data = await walletService.getBalance(req.user.id, req.user.role)
     return res.json({ success: true, data })
   } catch (err) {
     return handleError(res, err)

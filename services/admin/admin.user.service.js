@@ -1,14 +1,16 @@
 /**
  * 管理后台用户服务
- * 处理用户列表、详情、更新、密码重置等业务逻辑
+ * 处理用户列表、详情、更新、密码重置、邮箱认领等业务逻辑
  */
 
-const { canManageRole } = require('../../utils/permissions');
+const { canManageRole, ROLES } = require('../../utils/permissions');
 const userRepo = require('../../repositories/user.repository');
-const { sanitizeKeyword, logAdminAction } = require('./admin.common.service');
+const { sanitizeKeyword, logAdminAction, getOwnedUserIds, canAccessUser } = require('./admin.common.service');
+const { supabaseAdmin } = require('../../supabaseClient');
 
 /**
  * 分页查询用户列表
+ * 普通管理员仅返回归属自己的用户；超级管理员返回所有用户
  * @param {Object} req - Express 请求对象
  * @param {number} from - 起始索引
  * @param {number} to - 结束索引
@@ -16,6 +18,9 @@ const { sanitizeKeyword, logAdminAction } = require('./admin.common.service');
  */
 async function listUsers(req, from, to) {
   const keyword = sanitizeKeyword(req.query.keyword);
+  // 获取当前管理员的归属用户 ID 列表（超管返回 null）
+  const ownedUserIds = await getOwnedUserIds(req.user);
+
   const { data, error, count } = await userRepo.listUsers({
     from,
     to,
@@ -23,6 +28,7 @@ async function listUsers(req, from, to) {
     status: req.query.status,
     keyword,
     adminRole: req.user.role,
+    ownedUserIds,
   });
 
   if (error) {
@@ -34,6 +40,7 @@ async function listUsers(req, from, to) {
 
 /**
  * 查询单个用户详情
+ * 普通管理员仅可查询归属用户
  * @param {Object} req - Express 请求对象
  * @returns {Promise<Object>} 用户详情
  */
@@ -44,8 +51,12 @@ async function getUser(req) {
     throw Object.assign(new Error('用户不存在'), { statusCode: 404 });
   }
 
-  if (!canManageRole(req.user.role, data.role) && req.user.id !== data.user_id) {
-    throw Object.assign(new Error('无权查看该用户'), { statusCode: 403 });
+  // 超级管理员可查看所有用户；普通管理员只能查看归属用户
+  if (req.user.role !== ROLES.SUPER_ADMIN) {
+    const hasAccess = await canAccessUser(req.user, data.user_id);
+    if (!hasAccess && req.user.id !== data.user_id) {
+      throw Object.assign(new Error('无权查看该用户'), { statusCode: 403 });
+    }
   }
 
   return data;
@@ -53,6 +64,7 @@ async function getUser(req) {
 
 /**
  * 更新用户信息
+ * 普通管理员仅可更新归属用户
  * @param {Object} req - Express 请求对象
  * @returns {Promise<Object>} 更新后的用户数据
  */
@@ -63,8 +75,12 @@ async function updateUser(req) {
     throw Object.assign(new Error('用户不存在'), { statusCode: 404 });
   }
 
-  if (!canManageRole(req.user.role, target.role)) {
-    throw Object.assign(new Error('无权修改该用户'), { statusCode: 403 });
+  // 普通管理员只能操作归属用户
+  if (req.user.role !== ROLES.SUPER_ADMIN) {
+    const hasAccess = await canAccessUser(req.user, target.user_id);
+    if (!hasAccess) {
+      throw Object.assign(new Error('无权修改该用户'), { statusCode: 403 });
+    }
   }
 
   const payload = {};
@@ -94,18 +110,20 @@ async function updateUser(req) {
  * @returns {Promise<Object>} 重置链接信息
  */
 async function resetPassword(req) {
-  const { supabaseAdmin } = require('../../supabaseClient');
   const { data: target } = await userRepo.findById(req.params.userId);
 
   if (!target) {
     throw Object.assign(new Error('用户不存在'), { statusCode: 404 });
   }
 
-  if (!canManageRole(req.user.role, target.role)) {
-    throw Object.assign(new Error('无权重置该用户密码'), { statusCode: 403 });
+  // 普通管理员只能重置归属用户密码
+  if (req.user.role !== ROLES.SUPER_ADMIN) {
+    const hasAccess = await canAccessUser(req.user, target.user_id);
+    if (!hasAccess) {
+      throw Object.assign(new Error('无权重置该用户密码'), { statusCode: 403 });
+    }
   }
 
-  // 当前项目使用邮箱验证码登录，重置密码以 Supabase recovery 链接形式返回给管理员。
   const { data, error } = await supabaseAdmin.auth.admin.generateLink({
     type: 'recovery',
     email: target.email,
@@ -119,9 +137,60 @@ async function resetPassword(req) {
   return { action_link: data.properties && data.properties.action_link };
 }
 
+/**
+ * 通过邮箱认领用户（建立归属关系）
+ * @param {Object} req - Express 请求对象
+ * @returns {Promise<Object>} 认领结果
+ */
+async function claimUser(req) {
+  const email = String(req.body.email || '').trim().toLowerCase();
+  if (!email) {
+    throw Object.assign(new Error('请输入邮箱'), { statusCode: 400 });
+  }
+
+  // 查找目标用户
+  const { data: target, error } = await userRepo.findByEmail(email);
+  if (error || !target) {
+    throw Object.assign(new Error('用户不存在'), { statusCode: 404 });
+  }
+
+  // 仅可认领 USER 角色用户
+  if (target.role !== ROLES.USER) {
+    throw Object.assign(new Error('仅可认领普通用户'), { statusCode: 400 });
+  }
+
+  // 校验该用户未被认领
+  const { data: existing } = await supabaseAdmin
+    .from('admin_user_relation')
+    .select('id, admin_id')
+    .eq('user_id', target.user_id)
+    .maybeSingle();
+
+  if (existing) {
+    throw Object.assign(new Error('该用户已被其他管理员认领'), { statusCode: 409 });
+  }
+
+  // 写入归属关系
+  const now = new Date().toISOString();
+  const { error: insertError } = await supabaseAdmin.from('admin_user_relation').insert({
+    admin_id: req.user.id,
+    user_id: target.user_id,
+    bind_type: 'EMAIL_CLAIM',
+    create_time: now,
+  });
+
+  if (insertError) {
+    throw Object.assign(new Error(`认领失败：${insertError.message}`), { statusCode: 500 });
+  }
+
+  await logAdminAction(req, 'claim_user', 'user_profile', target.user_id);
+  return { user_id: target.user_id, email: target.email, nickname: target.nickname };
+}
+
 module.exports = {
   listUsers,
   getUser,
   updateUser,
   resetPassword,
+  claimUser,
 };

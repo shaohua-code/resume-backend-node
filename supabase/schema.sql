@@ -75,9 +75,8 @@ create table if not exists public.user_profile (
   user_id uuid primary key references auth.users(id) on delete cascade,
   email text not null,
   nickname text default '',
-  role text not null default 'USER' check (role in ('SUPER_ADMIN', 'ADMIN', 'USER', 'VIP')),
+  role text not null default 'USER' check (role in ('SUPER_ADMIN', 'ADMIN', 'USER')),
   status text not null default 'ACTIVE' check (status in ('ACTIVE', 'BANNED')),
-  vip_expire_time timestamptz,
   create_time timestamptz default now(),
   update_time timestamptz default now()
 );
@@ -146,7 +145,7 @@ create table if not exists public.announcement (
   update_time timestamptz default now()
 );
 
--- AI模型表：后台配置可选模型，并标记是否仅VIP可用
+-- AI模型表：后台配置可选模型
 create table if not exists public.ai_model (
   id bigserial primary key,
   name text not null,
@@ -154,7 +153,6 @@ create table if not exists public.ai_model (
   task_type text default 'all',
   input_price_per_million numeric(10, 4) default 0,
   output_price_per_million numeric(10, 4) default 0,
-  vip_only boolean default false,
   enabled boolean default true,
   create_time timestamptz default now(),
   update_time timestamptz default now()
@@ -174,19 +172,19 @@ create index if not exists idx_admin_action_log_admin_time on public.admin_actio
 -- 默认数据：首次执行后即可在后台看到基础套餐、AI模型和AI次数配置
 insert into public.membership_plan (name, price, duration_days, description, enabled)
 values
-  ('月度VIP', 19.90, 30, '解锁不限次数AI、导出和高级模板', true),
-  ('年度VIP', 199.00, 365, '一年内解锁全部VIP能力', true)
+  ('月度会员', 19.90, 30, '解锁不限次数AI、导出和高级模板', true),
+  ('年度会员', 199.00, 365, '一年内解锁全部能力', true)
 on conflict do nothing;
 
 insert into public.system_config (config_key, config_value, description)
 values
-  ('ai_daily_limit', '{"USER": 3, "VIP": -1}'::jsonb, '普通用户每日每类AI调用次数，-1表示不限次数')
+  ('ai_daily_limit', '{"USER": 3}'::jsonb, '普通用户每日每类AI调用次数，-1表示不限次数')
 on conflict (config_key) do nothing;
 
-insert into public.ai_model (name, model_key, task_type, input_price_per_million, output_price_per_million, vip_only, enabled)
+insert into public.ai_model (name, model_key, task_type, input_price_per_million, output_price_per_million, enabled)
 values
-  ('DeepSeek 默认模型', 'deepseek-v4-flash', 'all', 0.5, 2.0, false, true),
-  ('DeepSeek 高级模型', 'deepseek-chat', 'all', 2.0, 8.0, true, true)
+  ('DeepSeek 默认模型', 'deepseek-v4-flash', 'all', 0.5, 2.0, true),
+  ('DeepSeek 高级模型', 'deepseek-chat', 'all', 2.0, 8.0, true)
 on conflict (model_key) do nothing;
 
 -- 给 service_role 授权，后端使用 service_role 统一访问这些业务表
@@ -292,6 +290,76 @@ drop policy if exists "service_role_all_user_wallet" on public.user_wallet;
 create policy "service_role_all_user_wallet" on public.user_wallet for all to service_role using (true) with check (true);
 drop policy if exists "service_role_all_balance_ledger" on public.balance_ledger;
 create policy "service_role_all_balance_ledger" on public.balance_ledger for all to service_role using (true) with check (true);
+
+-- ============================================================
+-- 管理员用户归属与额度分配体系（详见 migrations/20260710_admin_user_relation.sql）
+-- ============================================================
+
+-- 管理员-用户归属关系表：一个用户只能归属一个管理员
+create table if not exists public.admin_user_relation (
+  id bigserial primary key,
+  admin_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  bind_type text not null check (bind_type in ('INVITE_LINK', 'EMAIL_CLAIM', 'LEGACY_MIGRATE')),
+  create_time timestamptz default now(),
+  unique (user_id)
+);
+create index if not exists idx_admin_user_relation_admin on public.admin_user_relation(admin_id);
+create index if not exists idx_admin_user_relation_user on public.admin_user_relation(user_id);
+
+-- 邀请链接表：管理员生成邀请码，用户通过链接注册时绑定归属
+create table if not exists public.invite_link (
+  id bigserial primary key,
+  admin_id uuid not null references auth.users(id) on delete cascade,
+  code text not null unique,
+  status text default 'ACTIVE' check (status in ('ACTIVE', 'DISABLED')),
+  expire_time timestamptz,
+  used_count int default 0,
+  create_time timestamptz default now()
+);
+create index if not exists idx_invite_link_admin on public.invite_link(admin_id);
+create index if not exists idx_invite_link_code on public.invite_link(code);
+
+-- 管理员额度池表：total_quota 为总额度，allocated_quota 为已分配，可分配余额=total-allocated
+create table if not exists public.admin_quota_pool (
+  admin_id uuid primary key references auth.users(id) on delete cascade,
+  total_quota numeric(16, 4) not null default 0,
+  allocated_quota numeric(16, 4) not null default 0,
+  update_time timestamptz default now()
+);
+
+-- balance_ledger 新增实付金额字段
+alter table public.balance_ledger
+  add column if not exists paid_amount numeric(12, 4) default 0;
+comment on column public.balance_ledger.paid_amount is '实付金额（用户实际支付给管理员的金额，仅 ADMIN_GRANT/ADMIN_ALLOCATE/ADMIN_POOL_GRANT 类型有值）';
+
+-- 超级管理员初始总额度池配置
+insert into public.system_config (config_key, config_value, description)
+values
+  ('super_admin_total_quota', '{"amount": 1000000}'::jsonb, '超级管理员初始总额度池（元）')
+on conflict (config_key) do nothing;
+
+grant all privileges on table public.admin_user_relation to service_role;
+grant all privileges on table public.invite_link to service_role;
+grant all privileges on table public.admin_quota_pool to service_role;
+grant usage, select on sequence public.admin_user_relation_id_seq to service_role;
+grant usage, select on sequence public.invite_link_id_seq to service_role;
+
+alter table public.admin_user_relation enable row level security;
+alter table public.invite_link enable row level security;
+alter table public.admin_quota_pool enable row level security;
+
+drop policy if exists "service_role_all_admin_user_relation" on public.admin_user_relation;
+create policy "service_role_all_admin_user_relation" on public.admin_user_relation
+  for all to service_role using (true) with check (true);
+
+drop policy if exists "service_role_all_invite_link" on public.invite_link;
+create policy "service_role_all_invite_link" on public.invite_link
+  for all to service_role using (true) with check (true);
+
+drop policy if exists "service_role_all_admin_quota_pool" on public.admin_quota_pool;
+create policy "service_role_all_admin_quota_pool" on public.admin_quota_pool
+  for all to service_role using (true) with check (true);
 
 -- 超级管理员初始化：先登录一次，再把下面邮箱替换成你的管理员邮箱执行
 -- update public.user_profile

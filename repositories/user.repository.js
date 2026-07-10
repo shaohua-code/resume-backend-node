@@ -29,18 +29,24 @@ async function countUsers(builder) {
  * @param {string} [params.status] - 按状态过滤
  * @param {string} [params.keyword] - 按邮箱或昵称模糊搜索
  * @param {string} params.adminRole - 当前管理员角色，用于数据范围控制
+ * @param {string[]|null} [params.ownedUserIds] - 归属用户 ID 列表（普通管理员用）；null 表示不过滤
  * @returns {Promise<Object>} Supabase 查询结果 { data, error, count }
  */
-async function listUsers({ from, to, role, status, keyword, adminRole }) {
+async function listUsers({ from, to, role, status, keyword, adminRole, ownedUserIds }) {
   let query = supabaseAdmin
     .from('user_profile')
     .select('*', { count: 'exact' })
     .order('create_time', { ascending: false })
     .range(from, to);
 
-  // 普通管理员只能查看普通用户
+  // 普通管理员只能查看归属自己的用户（通过 admin_user_relation 过滤）
   if (adminRole === ROLES.ADMIN) {
-    query = query.eq('role', ROLES.USER);
+    // 归属用户列表为空时，强制返回空结果
+    if (!ownedUserIds || ownedUserIds.length === 0) {
+      query = query.eq('user_id', '00000000-0000-0000-0000-000000000000');
+    } else {
+      query = query.in('user_id', ownedUserIds);
+    }
   }
 
   if (role) query = query.eq('role', role);
@@ -57,6 +63,15 @@ async function listUsers({ from, to, role, status, keyword, adminRole }) {
  */
 async function findById(userId) {
   return supabaseAdmin.from('user_profile').select('*').eq('user_id', userId).single();
+}
+
+/**
+ * 根据邮箱查询用户信息
+ * @param {string} email - 用户邮箱
+ * @returns {Promise<Object>} Supabase 查询结果 { data, error }
+ */
+async function findByEmail(email) {
+  return supabaseAdmin.from('user_profile').select('*').eq('email', email).maybeSingle();
 }
 
 /**
@@ -78,5 +93,6 @@ module.exports = {
   countUsers,
   listUsers,
   findById,
+  findByEmail,
   updateUser,
 };

@@ -1,9 +1,10 @@
 /**
  * 管理后台公共服务
- * 提供日志记录、关键词清洗、用户画像附加等通用能力
+ * 提供日志记录、关键词清洗、用户画像附加、归属用户查询等通用能力
  */
 
 const { supabaseAdmin } = require('../../supabaseClient');
+const { ROLES } = require('../../utils/permissions');
 
 /**
  * 清洗搜索关键词，移除首尾空格和特殊通配字符
@@ -57,8 +58,52 @@ async function logAdminAction(req, action, targetType = '', targetId = '') {
   });
 }
 
+/**
+ * 获取管理员归属的用户 ID 列表
+ * 普通管理员只能看归属自己的用户；超级管理员返回 null 表示不做过滤
+ * @param {Object} user - req.user 对象
+ * @returns {Promise<string[]|null>} 用户 ID 数组；null 表示不过滤（超管）
+ */
+async function getOwnedUserIds(user) {
+  // 超级管理员不做归属过滤
+  if (user.role === ROLES.SUPER_ADMIN) {
+    return null;
+  }
+  const { data, error } = await supabaseAdmin
+    .from('admin_user_relation')
+    .select('user_id')
+    .eq('admin_id', user.id);
+
+  if (error) {
+    throw Object.assign(new Error(`查询归属用户失败：${error.message}`), { statusCode: 500 });
+  }
+  return (data || []).map((row) => row.user_id);
+}
+
+/**
+ * 校验管理员是否有权访问目标用户
+ * 超级管理员可访问所有用户；普通管理员只能访问归属用户
+ * @param {Object} user - req.user 对象
+ * @param {string} targetUserId - 目标用户 ID
+ * @returns {Promise<boolean>}
+ */
+async function canAccessUser(user, targetUserId) {
+  if (user.role === ROLES.SUPER_ADMIN) {
+    return true;
+  }
+  const { data } = await supabaseAdmin
+    .from('admin_user_relation')
+    .select('id')
+    .eq('admin_id', user.id)
+    .eq('user_id', targetUserId)
+    .maybeSingle();
+  return !!data;
+}
+
 module.exports = {
   sanitizeKeyword,
   attachUserProfiles,
   logAdminAction,
+  getOwnedUserIds,
+  canAccessUser,
 };

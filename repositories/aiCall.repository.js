@@ -26,14 +26,24 @@ async function countAiCalls(builder) {
  * @param {number} params.to - 结束索引
  * @param {string} [params.userId] - 按用户 ID 过滤
  * @param {string} [params.taskType] - 按任务类型过滤
+ * @param {string[]|null} [params.userIds] - 按用户 ID 列表过滤（归属过滤）；null 表示不过滤
  * @returns {Promise<Object>} Supabase 查询结果 { data, error, count }
  */
-async function listAiCalls({ from, to, userId, taskType }) {
+async function listAiCalls({ from, to, userId, taskType, userIds }) {
   let query = supabaseAdmin
     .from('ai_call_record')
     .select('*', { count: 'exact' })
     .order('create_time', { ascending: false })
     .range(from, to);
+
+  // 归属用户过滤：userIds 为空数组时强制无结果；为 null 时不过滤
+  if (userIds !== undefined && userIds !== null) {
+    if (!userIds.length) {
+      query = query.eq('user_id', '00000000-0000-0000-0000-000000000000');
+    } else {
+      query = query.in('user_id', userIds);
+    }
+  }
 
   if (userId) query = query.eq('user_id', userId);
   if (taskType) query = query.eq('task_type', taskType);
