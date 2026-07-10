@@ -11,6 +11,7 @@ const { supabaseAdmin } = require('../../supabaseClient');
 /**
  * 分页查询用户列表
  * 普通管理员仅返回归属自己的用户；超级管理员返回所有用户
+ * 当查询管理员账号时（mode=admins），会额外为每个管理员附加其管理的用户数量
  * @param {Object} req - Express 请求对象
  * @param {number} from - 起始索引
  * @param {number} to - 结束索引
@@ -35,7 +36,37 @@ async function listUsers(req, from, to) {
     throw Object.assign(new Error(`查询用户失败：${error.message}`), { statusCode: 500 });
   }
 
-  return { total: count || 0, items: data || [] };
+  let items = data || [];
+
+  // 如果是管理员账号页面（查询 ADMIN/SUPER_ADMIN 角色），为每个管理员统计其管理的用户数量
+  if (items.length > 0 && items[0].role && ['ADMIN', 'SUPER_ADMIN'].includes(items[0].role)) {
+    // 批量获取所有管理员的管理用户数量
+    const adminIds = items.map(item => item.user_id).filter(id => id);
+
+    if (adminIds.length > 0) {
+      // 查询每个管理员在 admin_user_relation 表中的关联用户数
+      const { data: relationCounts, error: countError } = await supabaseAdmin
+        .from('admin_user_relation')
+        .select('admin_id')
+        .in('admin_id', adminIds);
+
+      if (!countError && relationCounts) {
+        // 统计每个管理员的管理人数
+        const countMap = {};
+        relationCounts.forEach(relation => {
+          countMap[relation.admin_id] = (countMap[relation.admin_id] || 0) + 1;
+        });
+
+        // 将管理人数附加到每个管理员数据上
+        items = items.map(item => ({
+          ...item,
+          managed_count: countMap[item.user_id] || 0,
+        }));
+      }
+    }
+  }
+
+  return { total: count || 0, items };
 }
 
 /**
