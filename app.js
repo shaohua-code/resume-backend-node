@@ -13,6 +13,9 @@ const { errorHandler } = require('./middlewares/errorHandler')
 
 const app = express()
 
+// 部署在反向代理后时，正确解析客户端 IP
+app.set('trust proxy', 1)
+
 // 请求体解析，限制 10MB 防止大 JSON / base64 图片导致内存问题
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true }))

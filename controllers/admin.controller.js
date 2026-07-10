@@ -13,6 +13,7 @@ const feedbackService = require('../services/admin/admin.feedback.service');
 const walletService = require('../services/wallet/wallet.service');
 const ledgerService = require('../services/admin/admin.ledger.service');
 const inviteService = require('../services/admin/admin.invite.service');
+const visitService = require('../services/admin/admin.visit.service');
 
 /**
  * 解析分页参数
@@ -409,6 +410,19 @@ async function getQuotaPoolSummary(req, res) {
   }
 }
 
+/**
+ * 访客记录列表（仅超级管理员）
+ */
+async function listVisits(req, res) {
+  try {
+    const { from, to } = parsePagination(req);
+    const result = await visitService.listVisits(req, from, to);
+    return res.json({ success: true, total: result.total, items: result.items });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
 module.exports = {
   getStats,
   getDashboard,
@@ -437,4 +451,5 @@ module.exports = {
   updateInviteLink,
   deleteInviteLink,
   getQuotaPoolSummary,
+  listVisits,
 };

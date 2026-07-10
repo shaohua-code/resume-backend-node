@@ -12,6 +12,7 @@ const adminRouter = require('./admin')
 const uploadRouter = require('./upload')
 const feedbackRouter = require('./feedback')
 const walletRouter = require('./wallet')
+const visitRouter = require('./visit')
 
 const router = express.Router()
 
@@ -23,5 +24,6 @@ router.use('/admin', adminRouter)
 router.use('/upload', uploadRouter)
 router.use('/feedback', feedbackRouter)
 router.use('/wallet', walletRouter)
+router.use('/visits', visitRouter)
 
 module.exports = router

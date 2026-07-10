@@ -71,4 +71,7 @@ crudConfigs.forEach(({ path, table, permission }) => {
 router.get('/feedbacks', requirePermission(PERMISSIONS.ADMIN_VIEW_FEEDBACK), adminController.listFeedbacks)
 router.get('/feedbacks/:id', requirePermission(PERMISSIONS.ADMIN_VIEW_FEEDBACK), adminController.getFeedback)
 
+// 访客记录（仅 SUPER_ADMIN）
+router.get('/visits', requirePermission(PERMISSIONS.ADMIN_VIEW_VISITS), adminController.listVisits)
+
 module.exports = router
