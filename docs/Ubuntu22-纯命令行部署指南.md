@@ -235,46 +235,10 @@ scp -r "d:\project\新建文件夹\resume-backend-node" root@175.178.62.55:/var/
 cd /var/www/resume-backend-node
 ```
 
-### 6.2.1 确认代码已是 PostgreSQL 版本（必做）
-
-上传后**先检查**，再 `npm install`。若仍是旧 Supabase 代码，启动会报 `supabaseUrl is required`。
-
-```bash
-cd /var/www/resume-backend-node
-
-# 新代码：约 10 行，含 pgAdmin，不含 createClient
-wc -l supabaseClient.js
-head -5 supabaseClient.js
-
-# 以下任一有输出 = 旧代码，需重新上传本地最新代码
-grep -n 'createClient' supabaseClient.js
-grep '@supabase/supabase-js' package.json
-ls lib/db.js lib/pgCompat.js 2>/dev/null || echo '缺少 lib/ 目录，需重新上传'
-```
-
-**正确**的 `supabaseClient.js` 开头应类似：
-
-```javascript
-const { pgAdmin } = require('./lib/pgCompat')
-const supabaseAdmin = pgAdmin
-module.exports = { supabaseAdmin, pgAdmin }
-```
-
-若仍是旧版，在**本机 Windows** 重新覆盖上传（注意路径）：
-
-```powershell
-scp -r "d:\project\新建文件夹\resume-backend-node\*" root@175.178.62.55:/var/www/resume-backend-node/
-```
-
 ### 6.3 安装依赖
 
 ```bash
-cd /var/www/resume-backend-node
-rm -rf node_modules
 npm install --production
-
-# 确认已无 Supabase 包
-ls node_modules/@supabase 2>/dev/null && echo '仍有旧依赖，检查 package.json' || echo 'OK：无 Supabase'
 ```
 
 ### 6.4 创建上传目录
@@ -329,31 +293,10 @@ APP_FRONTEND_URL=http://175.178.62.55
 
 ```bash
 cd /var/www/resume-backend-node
-
-# 先单独测数据库客户端，避免整服务启动才报错
-node -e "require('./supabaseClient'); console.log('supabaseClient OK')"
-
 node main.js
 ```
 
 看到 `[服务] 已启动: http://localhost:8000` 即成功。`Ctrl+C` 停止，下一步用 PM2。
-
-### 常见错误：`supabaseUrl is required`
-
-**原因**：服务器代码仍是 Supabase 旧版（`supabaseClient.js` 第 29 行 `createClient`），与已去掉 `SUPABASE_URL` 的 `.env` 冲突。
-
-**一键修复**（SSH 在服务器执行）：
-
-```bash
-cd /var/www/resume-backend-node
-grep -q 'createClient' supabaseClient.js && echo '❌ 仍是旧代码，请在本机 scp 上传最新代码' || echo '✅ supabaseClient 已是 pg 版本'
-rm -rf node_modules
-npm install --production
-node -e "require('./supabaseClient'); console.log('OK')"
-node main.js
-```
-
-若第一步显示「仍是旧代码」，必须在本地重新 `scp` 整个项目后再执行后续命令。
 
 ### 测试数据库连接
 
@@ -658,13 +601,44 @@ sudo systemctl status postgresql
 psql -h 127.0.0.1 -U ai_resume -d ai_resume -f /tmp/init.sql
 ```
 
-### Q4: `DB FAIL: Connection terminated unexpectedly`
+### Q4: `DB FAIL: Connection terminated due to connection timeout`
 
-`.env` 必须用 `127.0.0.1`，不要用公网 IP：
+**最常见原因**：`.env` 里 `DATABASE_URL` 写了公网 IP `175.178.62.55`。后端与数据库在同一台机器时，必须连 `127.0.0.1`，且安全组也不应开放 5432。
+
+**排查（服务器执行）**：
+
+```bash
+cd /var/www/resume-backend-node
+grep DATABASE_URL .env
+
+# 应只有一行，且 host 为 127.0.0.1
+sudo systemctl status postgresql
+psql -h 127.0.0.1 -U ai_resume -d ai_resume -c "SELECT 1"
+```
+
+**修复**：
+
+```bash
+nano /var/www/resume-backend-node/.env
+```
+
+改为（密码与建库时一致）：
 
 ```env
-DATABASE_URL=postgresql://ai_resume:密码@127.0.0.1:5432/ai_resume
+DATABASE_URL=postgresql://ai_resume:sss980318..@127.0.0.1:5432/ai_resume
 ```
+
+再测：
+
+```bash
+node -e "require('dotenv').config(); require('./lib/db').ping().then(()=>console.log('DB OK')).catch(e=>console.error('DB FAIL:', e.message))"
+```
+
+若 `psql -h 127.0.0.1` 也失败，先处理 PostgreSQL（见 Q1、Q2），不要改 Node 代码。
+
+### Q4b: `DB FAIL: Connection terminated unexpectedly`
+
+同 Q4，检查 `DATABASE_URL` 是否用 `127.0.0.1`，用户名/库名是否为 `ai_resume`（下划线，不是连字符）。
 
 ### Q5: 验证码收不到
 
