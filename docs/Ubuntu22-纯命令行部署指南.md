@@ -241,12 +241,23 @@ cd /var/www/resume-backend-node
 npm install --production
 ```
 
-### 6.4 创建上传目录
+### 6.4 创建上传目录（独立于 Git 仓库）
+
+上传文件存放在项目外，避免 `git pull` 覆盖用户头像和 PDF：
 
 ```bash
-mkdir -p uploads
-chmod 755 uploads
+mkdir -p /var/www/resume-uploads/pdfs /var/www/resume-uploads/assets
+chmod -R 755 /var/www/resume-uploads
 ```
+
+> 迁移后一次性清理旧目录（可选）：
+>
+> ```bash
+> rm -rf /var/www/resume-backend-node/uploads/*
+> rm -rf /var/www/resume-uploads/*
+> ```
+>
+> 清理后数据库中旧头像路径（如 `/uploads/files/...`）会失效，需用户重新上传。
 
 ---
 
@@ -287,6 +298,9 @@ CORS_ORIGINS=http://localhost:5173,http://175.178.62.55
 
 # 前端地址
 APP_FRONTEND_URL=http://175.178.62.55
+
+# 上传目录（独立于 Git 仓库）
+UPLOAD_DIR=/var/www/resume-uploads
 ```
 
 ### 测试启动
@@ -559,6 +573,24 @@ ON CONFLICT (admin_id) DO NOTHING;
 
 重新登录后应能进入管理后台。
 
+### 11.3 初始化用户额度
+
+重置所有 USER 余额为注册赠送额（默认 10 元），并重建超管额度池（100 万）：
+
+```bash
+psql -h 127.0.0.1 -U ai_resume -d ai_resume -f /var/www/resume-backend-node/database/ops/init_all_user_quota.sql
+```
+
+### 11.4 清除所有用户（可选，不可逆）
+
+如需清空全部账号后重新注册：
+
+```bash
+psql -h 127.0.0.1 -U ai_resume -d ai_resume -f /var/www/resume-backend-node/database/ops/clear_all_users.sql
+```
+
+执行后需重新完成 §11.1 注册与 §11.2 超管 SQL。密码登录时服务端日志会输出 `[登录调试]`（含原始密码与加密 hash），便于排查认证问题。
+
 ---
 
 ## 12. 验证清单
@@ -575,7 +607,9 @@ ON CONFLICT (admin_id) DO NOTHING;
 □ 9. curl http://175.178.62.55/api/ 外网可访问
 □ 10. 能发验证码、注册、登录
 □ 11. 超管 SQL 已执行
-□ 12. AI 生成简历正常
+□ 12. UPLOAD_DIR 目录存在且可写（/var/www/resume-uploads）
+□ 13. 上传头像返回 /uploads/assets/... 可访问
+□ 14. AI 生成简历正常
 ```
 
 ---
@@ -716,13 +750,15 @@ curl http://175.178.62.55/api/
 
 ```
 /var/www/
+├── resume-uploads/          # 上传文件（独立于 Git）
+│   ├── pdfs/                # 用户 PDF 简历
+│   └── assets/              # 头像、反馈图片等
 ├── resume-backend-node/     # 后端
 │   ├── main.js
 │   ├── .env
 │   ├── ecosystem.config.js
 │   ├── database/init.sql
 │   ├── lib/
-│   ├── uploads/
 │   └── ...
 └── resume-frontend/         # 前端（可选）
     └── dist/

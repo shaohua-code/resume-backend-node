@@ -5,7 +5,7 @@
 
 const express = require('express');
 const TurndownService = require('turndown');
-const { supabaseAdmin } = require('../supabaseClient');
+const { dbAdmin } = require('../dbClient');
 const { authRequired } = require('../middlewares/auth');
 
 const router = express.Router();
@@ -37,7 +37,7 @@ router.post('/', async (req, res) => {
     const contentMd = htmlToMarkdown(contentHtml);
     const now = new Date().toISOString();
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await dbAdmin
       .from('user_feedback')
       .insert({
         user_id: req.user.id,

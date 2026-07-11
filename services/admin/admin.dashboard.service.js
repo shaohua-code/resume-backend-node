@@ -3,7 +3,7 @@
  * 聚合统计指标、趋势图、余额消费概览、公告与系统状态
  */
 
-const { supabaseAdmin } = require('../../supabaseClient')
+const { dbAdmin } = require('../../dbClient')
 const { ROLES } = require('../../utils/permissions')
 const userRepo = require('../../repositories/user.repository')
 const aiCallRepo = require('../../repositories/aiCall.repository')
@@ -13,7 +13,7 @@ const walletService = require('../wallet/wallet.service')
  * 获取指定表的数量，支持自定义过滤条件
  */
 async function getTableCount(table, builder) {
-  let query = supabaseAdmin.from(table).select('*', { count: 'exact', head: true })
+  let query = dbAdmin.from(table).select('*', { count: 'exact', head: true })
   if (builder) {
     query = builder(query)
   }
@@ -86,7 +86,7 @@ async function getStats() {
     userRepo.countUsers((query) => query.in('role', [ROLES.ADMIN, ROLES.SUPER_ADMIN])),
     getTableCount('resume'),
     aiCallRepo.countAiCalls(),
-    supabaseAdmin.from('user_wallet').select('balance,total_consumed'),
+    dbAdmin.from('user_wallet').select('balance,total_consumed'),
   ])
 
   const wallets = walletStats.data || []
@@ -168,8 +168,8 @@ async function getDashboard(req) {
     getTableCount('resume'),
     userRepo.countUsers((query) => query.gte('create_time', todayStart)),
     userRepo.countUsers((query) => query.gte('create_time', yesterdayStart).lt('create_time', todayStart)),
-    supabaseAdmin.from('user_wallet').select('balance,total_consumed'),
-    supabaseAdmin
+    dbAdmin.from('user_wallet').select('balance,total_consumed'),
+    dbAdmin
       .from('balance_ledger')
       .select('amount,type,create_time')
       .gte('create_time', rangeStart),  // 使用动态时间范围
@@ -184,7 +184,7 @@ async function getDashboard(req) {
   const grantRows = ledgerRows.filter((row) => row.type === 'ADMIN_GRANT' || row.type === 'REGISTER_GIFT')
 
   const [{ data: userRows }, { data: aiRows }] = await Promise.all([
-    supabaseAdmin
+    dbAdmin
       .from('user_profile')
       .select('create_time,role')
       .gte('create_time', rangeStart),  // 使用动态时间范围
@@ -196,13 +196,13 @@ async function getDashboard(req) {
   const grantTrend = bucketAmountByMonth(grantRows, months)
   const aiTrend = bucketByMonth(aiRows, months, () => true)
 
-  const { data: announcements } = await supabaseAdmin
+  const { data: announcements } = await dbAdmin
     .from('announcement')
     .select('id,title,enabled,create_time')
     .order('create_time', { ascending: false })
     .limit(5)
 
-  const { error: dbError } = await supabaseAdmin.from('system_config').select('config_key').limit(1)
+  const { error: dbError } = await dbAdmin.from('system_config').select('config_key').limit(1)
   const systemStatus = {
     api: 'ok',
     db: dbError ? 'error' : 'ok',

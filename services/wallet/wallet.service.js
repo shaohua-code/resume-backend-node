@@ -7,7 +7,7 @@ const walletRepo = require('../../repositories/wallet.repository')
 const userRepo = require('../../repositories/user.repository')
 const { ROLES, PERMISSIONS, hasPermission, canManageRole } = require('../../utils/permissions')
 const { logAdminAction, getOwnedUserIds, canAccessUser } = require('../admin/admin.common.service')
-const { supabaseAdmin } = require('../../supabaseClient')
+const { dbAdmin } = require('../../dbClient')
 
 // 流水类型枚举
 const LEDGER_TYPES = {
@@ -30,7 +30,7 @@ const MIN_AI_BALANCE = 0.01
  * @returns {Promise<number>}
  */
 async function getRegisterGiftAmount() {
-  const { data } = await supabaseAdmin
+  const { data } = await dbAdmin
     .from('system_config')
     .select('config_value')
     .eq('config_key', 'register_gift_amount')
@@ -44,7 +44,7 @@ async function getRegisterGiftAmount() {
  * @returns {Promise<number>}
  */
 async function getSuperAdminTotalQuota() {
-  const { data } = await supabaseAdmin
+  const { data } = await dbAdmin
     .from('system_config')
     .select('config_value')
     .eq('config_key', 'super_admin_total_quota')
@@ -194,7 +194,7 @@ async function deductSuperAdminQuotaPool(amount) {
   if (deductAmount <= 0) return
 
   // 找到首个超级管理员的额度池
-  const { data: superAdmin } = await supabaseAdmin
+  const { data: superAdmin } = await dbAdmin
     .from('user_profile')
     .select('user_id')
     .eq('role', 'SUPER_ADMIN')
@@ -866,7 +866,7 @@ async function listWalletsForAdmin(req, from, to) {
     .map((p) => p.user_id)
   let quotaPoolMap = {}
   if (adminUserIds.length > 0) {
-    const { data: pools } = await supabaseAdmin
+    const { data: pools } = await dbAdmin
       .from('admin_quota_pool')
       .select('*')
       .in('admin_id', adminUserIds)

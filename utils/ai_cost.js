@@ -3,7 +3,7 @@
  * 根据 ai_model 表配置的每百万 token 单价，计算单次调用费用（CNY）
  */
 
-const { supabaseAdmin } = require('../supabaseClient');
+const { dbAdmin } = require('../dbClient');
 
 function normalizeUsage(usage = {}) {
   const promptTokens = Number(usage.prompt_tokens) || 0;
@@ -28,7 +28,7 @@ async function calcAiCost(modelKey, usage = {}) {
     return 0;
   }
 
-  const { data } = await supabaseAdmin
+  const { data } = await dbAdmin
     .from('ai_model')
     .select('input_price_per_million, output_price_per_million')
     .eq('model_key', modelKey)

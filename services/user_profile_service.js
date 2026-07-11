@@ -1,9 +1,9 @@
 /**
  * 用户资料服务
- * Supabase Auth 只负责登录身份，这里维护业务角色、封禁状态和会员时间。
+ * JWT 认证负责登录身份，这里维护业务角色、封禁状态。
  */
 
-const { supabaseAdmin } = require('../supabaseClient');
+const { dbAdmin } = require('../dbClient');
 const { getEffectiveRole, getRolePermissions } = require('../utils/permissions');
 const { initWalletForNewUser } = require('./wallet/wallet.service');
 
@@ -28,7 +28,7 @@ function attachPermissionInfo(profile) {
 }
 
 async function getUserProfile(userId) {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await dbAdmin
     .from('user_profile')
     .select('*')
     .eq('user_id', userId)
@@ -41,7 +41,7 @@ async function getUserProfile(userId) {
 
 async function ensureUserProfile(user) {
   const payload = buildProfilePayload(user);
-  const { data: existing } = await supabaseAdmin
+  const { data: existing } = await dbAdmin
     .from('user_profile')
     .select('*')
     .eq('user_id', user.id)
@@ -49,7 +49,7 @@ async function ensureUserProfile(user) {
 
   if (existing) {
     // 每次登录同步邮箱和昵称，角色与封禁状态由后台维护，不能被登录流程覆盖。
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await dbAdmin
       .from('user_profile')
       .update({
         email: payload.email,
@@ -63,7 +63,7 @@ async function ensureUserProfile(user) {
     return attachPermissionInfo(data);
   }
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await dbAdmin
     .from('user_profile')
     .insert({
       ...payload,

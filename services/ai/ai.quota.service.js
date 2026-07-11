@@ -3,7 +3,7 @@
  * 负责调用前余额校验、调用记录持久化与成功后扣费
  */
 
-const { supabaseAdmin } = require('../../supabaseClient')
+const { dbAdmin } = require('../../dbClient')
 const walletService = require('../wallet/wallet.service')
 
 /**
@@ -33,7 +33,7 @@ async function recordAiCall(req, taskType, model, success, errorMessage = '', me
   const usage = meta?.usage || {}
   const cost = meta?.cost || 0
 
-  const { data: callRecord, error } = await supabaseAdmin
+  const { data: callRecord, error } = await dbAdmin
     .from('ai_call_record')
     .insert({
       user_id: req.user.id,

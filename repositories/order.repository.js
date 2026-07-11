@@ -1,9 +1,9 @@
 /**
  * 订单数据仓库
- * 封装所有与 Supabase order_record 表直接交互的操作
+ * 封装所有与 PostgreSQL order_record 表直接交互的操作
  */
 
-const { supabaseAdmin } = require('../supabaseClient');
+const { dbAdmin } = require('../dbClient');
 
 /**
  * 按条件统计订单数量
@@ -11,7 +11,7 @@ const { supabaseAdmin } = require('../supabaseClient');
  * @returns {Promise<number>} 订单数量
  */
 async function countOrders(builder) {
-  let query = supabaseAdmin.from('order_record').select('*', { count: 'exact', head: true });
+  let query = dbAdmin.from('order_record').select('*', { count: 'exact', head: true });
   if (builder) {
     query = builder(query);
   }
@@ -26,10 +26,10 @@ async function countOrders(builder) {
  * @param {number} params.to - 结束索引
  * @param {string} [params.status] - 按状态过滤
  * @param {string} [params.userId] - 按用户 ID 过滤
- * @returns {Promise<Object>} Supabase 查询结果 { data, error, count }
+ * @returns {Promise<Object>} PostgreSQL 查询结果 { data, error, count }
  */
 async function listOrders({ from, to, status, userId }) {
-  let query = supabaseAdmin
+  let query = dbAdmin
     .from('order_record')
     .select('*, membership_plan(name)', { count: 'exact' })
     .order('create_time', { ascending: false })
@@ -44,29 +44,29 @@ async function listOrders({ from, to, status, userId }) {
 /**
  * 查询所有订单，用于大盘统计
  * @param {string} fields - 需要查询的字段列表
- * @returns {Promise<Object>} Supabase 查询结果 { data, error }
+ * @returns {Promise<Object>} PostgreSQL 查询结果 { data, error }
  */
 async function findAllOrders(fields = 'amount,status,create_time') {
-  return supabaseAdmin.from('order_record').select(fields);
+  return dbAdmin.from('order_record').select(fields);
 }
 
 /**
  * 创建订单
  * @param {Object} payload - 订单数据
- * @returns {Promise<Object>} Supabase 插入结果 { data, error }
+ * @returns {Promise<Object>} PostgreSQL 插入结果 { data, error }
  */
 async function createOrder(payload) {
-  return supabaseAdmin.from('order_record').insert(payload).select().single();
+  return dbAdmin.from('order_record').insert(payload).select().single();
 }
 
 /**
  * 更新订单
  * @param {string} id - 订单 ID
  * @param {Object} payload - 更新字段
- * @returns {Promise<Object>} Supabase 更新结果 { data, error }
+ * @returns {Promise<Object>} PostgreSQL 更新结果 { data, error }
  */
 async function updateOrder(id, payload) {
-  return supabaseAdmin
+  return dbAdmin
     .from('order_record')
     .update(payload)
     .eq('id', id)

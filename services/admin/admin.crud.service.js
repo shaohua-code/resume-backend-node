@@ -3,7 +3,7 @@
  * 为 plans/announcements/models 等简单表提供通用增删改查能力
  */
 
-const { supabaseAdmin } = require('../../supabaseClient');
+const { dbAdmin } = require('../../dbClient');
 const { logAdminAction } = require('./admin.common.service');
 
 /**
@@ -12,7 +12,7 @@ const { logAdminAction } = require('./admin.common.service');
  * @returns {Promise<Array<Object>>} 记录列表
  */
 async function listItems(table) {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await dbAdmin
     .from(table)
     .select('*')
     .order('create_time', { ascending: false });
@@ -34,7 +34,7 @@ async function listItems(table) {
  */
 async function createItem(req, table, body, idColumn = 'id') {
   const now = new Date().toISOString();
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await dbAdmin
     .from(table)
     .insert({ ...body, create_time: now, update_time: now })
     .select()
@@ -58,7 +58,7 @@ async function createItem(req, table, body, idColumn = 'id') {
  * @returns {Promise<Object>} 更新后的记录
  */
 async function updateItem(req, table, id, body, idColumn = 'id') {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await dbAdmin
     .from(table)
     .update({ ...body, update_time: new Date().toISOString() })
     .eq(idColumn, id)
@@ -82,7 +82,7 @@ async function updateItem(req, table, id, body, idColumn = 'id') {
  * @returns {Promise<void>}
  */
 async function deleteItem(req, table, id, idColumn = 'id') {
-  const { error } = await supabaseAdmin.from(table).delete().eq(idColumn, id);
+  const { error } = await dbAdmin.from(table).delete().eq(idColumn, id);
 
   if (error) {
     throw Object.assign(new Error(`删除失败：${error.message}`), { statusCode: 500 });

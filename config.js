@@ -3,6 +3,7 @@
  */
 
 require('dotenv').config()
+const path = require('path')
 
 const settings = {
   PORT: parseInt(process.env.PORT || '8000', 10),
@@ -39,6 +40,9 @@ const settings = {
     .filter(Boolean),
 
   APP_FRONTEND_URL: process.env.APP_FRONTEND_URL || process.env.FRONTEND_URL || 'http://localhost:5173',
+
+  // 上传文件根目录（生产环境建议 /var/www/resume-uploads，独立于 Git 仓库）
+  UPLOAD_DIR: process.env.UPLOAD_DIR || path.join(__dirname, 'data', 'uploads'),
 }
 
 if (!settings.DATABASE_URL) {

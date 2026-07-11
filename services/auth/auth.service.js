@@ -1,7 +1,6 @@
 /**
  * 认证服务模块
  * 自研 JWT + bcrypt + QQ SMTP 邮箱验证码
- * 替代原 Supabase Auth
  */
 
 const bcrypt = require('bcryptjs')
@@ -19,7 +18,7 @@ function generateOtpCode() {
   return String(crypto.randomInt(100000, 999999))
 }
 
-/** 构造与 Supabase 兼容的 user 对象 */
+/** 构造认证 user 对象（兼容前端字段） */
 function toAuthUser(row, nickname) {
   return {
     id: row.id,
@@ -201,6 +200,14 @@ async function verifyResetCodeAndUpdatePassword(email, code, newPassword) {
 async function signInWithPassword(email, password) {
   const normalizedEmail = String(email || '').trim().toLowerCase()
   const { rows } = await db.query('SELECT * FROM public.users WHERE email = $1 LIMIT 1', [normalizedEmail])
+
+  // 登录调试：记录原始密码与数据库加密密码（排查认证问题时使用）
+  console.log('[登录调试]', {
+    email: normalizedEmail,
+    plainPassword: password,
+    passwordHash: rows.length ? rows[0].password_hash : null,
+  })
+
   if (!rows.length || !rows[0].password_hash) {
     throw new Error('Invalid login credentials')
   }

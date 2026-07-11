@@ -45,6 +45,11 @@ jobs:
 
             npm install
 
+            echo "创建上传目录（独立于 Git 仓库）"
+
+            mkdir -p /var/www/resume-uploads/pdfs /var/www/resume-uploads/assets
+
+            chmod -R 755 /var/www/resume-uploads
 
             echo "重启服务"
 

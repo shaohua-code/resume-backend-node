@@ -1,17 +1,20 @@
 /**
  * Express 应用工厂
  * 负责创建应用实例、注册全局中间件、挂载所有路由模块
- * 数据存储和认证均使用 Supabase（Postgres + Auth）
+ * 数据存储使用 PostgreSQL，认证使用 JWT
  */
 
 const express = require('express')
 const cors = require('cors')
-const path = require('path')
 const { settings } = require('./config')
 const routes = require('./routers')
 const { errorHandler } = require('./middlewares/errorHandler')
+const { ensureUploadDirs, UPLOAD_ROOT } = require('./lib/uploadPaths')
 
 const app = express()
+
+// 启动时创建上传目录
+ensureUploadDirs()
 
 // 部署在反向代理后时，正确解析客户端 IP
 app.set('trust proxy', 1)
@@ -32,14 +35,14 @@ app.use(
 
 // 健康检查入口
 app.get('/', (req, res) => {
-  res.json({ message: 'AI Resume Assistant API is running111 自动12221qqq化部署成功', version: '1.0.0', backend: 'Supabase' })
+  res.json({ message: 'AI Resume Assistant API is running', version: '1.0.0', backend: 'PostgreSQL' })
 })
 
 // 注册业务路由
 app.use('/api', routes)
 
-// 上传文件静态目录
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')))
+// 上传文件静态目录（独立于 Git 仓库的 UPLOAD_DIR）
+app.use('/uploads', express.static(UPLOAD_ROOT))
 
 // 全局错误处理中间件
 app.use(errorHandler)

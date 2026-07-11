@@ -4,7 +4,7 @@
  */
 
 const resumeRepo = require('../../repositories/resume.repository');
-const { supabaseAdmin } = require('../../supabaseClient');
+const { dbAdmin } = require('../../dbClient');
 
 // 每位用户最多可保存的简历数量
 const MAX_RESUME_COUNT = 5;
@@ -41,9 +41,9 @@ async function createResume(userId, body) {
   }
 
   const { data, error, status, statusText } = await resumeRepo.createResume(userId, body);
-  console.log('[create] Supabase 返回 status =', status, statusText);
+  console.log('[create] 数据库返回 status =', status, statusText);
   if (error) {
-    console.error('[create] Supabase error =', error);
+    console.error('[create] 数据库 error =', error);
     throw Object.assign(new Error(`创建失败：${error.message}`), { code: error.code, statusCode: 500 });
   }
   console.log('[create] 写入成功，data =', data);
@@ -54,7 +54,7 @@ async function updateResume(userId, resumeId, body) {
   const { data, error, status, statusText } = await resumeRepo.updateResume(userId, resumeId, body);
   console.log('[update] id =', resumeId, 'status =', status, statusText);
   if (error) {
-    console.error('[update] Supabase error =', error);
+    console.error('[update] 数据库 error =', error);
     throw Object.assign(new Error(`更新失败：${error.message}`), { code: error.code, statusCode: 500 });
   }
   if (!data) {
@@ -126,7 +126,7 @@ async function recordExport(user, resumeId) {
   if (!resume) {
     throw Object.assign(new Error('简历不存在'), { statusCode: 404 });
   }
-  const { error } = await supabaseAdmin.from('export_record').insert({
+  const { error } = await dbAdmin.from('export_record').insert({
     user_id: user.id,
     resume_id: resumeId,
     create_time: new Date().toISOString(),

@@ -1,9 +1,9 @@
 /**
  * 用户数据仓库
- * 封装所有与 Supabase user_profile 表直接交互的操作
+ * 封装所有与 PostgreSQL user_profile 表直接交互的操作
  */
 
-const { supabaseAdmin } = require('../supabaseClient');
+const { dbAdmin } = require('../dbClient');
 const { ROLES } = require('../utils/permissions');
 
 /**
@@ -12,7 +12,7 @@ const { ROLES } = require('../utils/permissions');
  * @returns {Promise<number>} 用户数量
  */
 async function countUsers(builder) {
-  let query = supabaseAdmin.from('user_profile').select('*', { count: 'exact', head: true });
+  let query = dbAdmin.from('user_profile').select('*', { count: 'exact', head: true });
   if (builder) {
     query = builder(query);
   }
@@ -30,10 +30,10 @@ async function countUsers(builder) {
  * @param {string} [params.keyword] - 按邮箱或昵称模糊搜索
  * @param {string} params.adminRole - 当前管理员角色，用于数据范围控制
  * @param {string[]|null} [params.ownedUserIds] - 归属用户 ID 列表（普通管理员用）；null 表示不过滤
- * @returns {Promise<Object>} Supabase 查询结果 { data, error, count }
+ * @returns {Promise<Object>} PostgreSQL 查询结果 { data, error, count }
  */
 async function listUsers({ from, to, role, status, keyword, adminRole, ownedUserIds }) {
-  let query = supabaseAdmin
+  let query = dbAdmin
     .from('user_profile')
     .select('*', { count: 'exact' })
     .order('create_time', { ascending: false })
@@ -59,29 +59,29 @@ async function listUsers({ from, to, role, status, keyword, adminRole, ownedUser
 /**
  * 根据用户 ID 查询用户信息
  * @param {string} userId - 用户 ID
- * @returns {Promise<Object>} Supabase 查询结果 { data, error }
+ * @returns {Promise<Object>} PostgreSQL 查询结果 { data, error }
  */
 async function findById(userId) {
-  return supabaseAdmin.from('user_profile').select('*').eq('user_id', userId).single();
+  return dbAdmin.from('user_profile').select('*').eq('user_id', userId).single();
 }
 
 /**
  * 根据邮箱查询用户信息
  * @param {string} email - 用户邮箱
- * @returns {Promise<Object>} Supabase 查询结果 { data, error }
+ * @returns {Promise<Object>} PostgreSQL 查询结果 { data, error }
  */
 async function findByEmail(email) {
-  return supabaseAdmin.from('user_profile').select('*').eq('email', email).maybeSingle();
+  return dbAdmin.from('user_profile').select('*').eq('email', email).maybeSingle();
 }
 
 /**
  * 更新用户信息
  * @param {string} userId - 用户 ID
  * @param {Object} payload - 更新字段
- * @returns {Promise<Object>} Supabase 更新结果 { data, error }
+ * @returns {Promise<Object>} PostgreSQL 更新结果 { data, error }
  */
 async function updateUser(userId, payload) {
-  return supabaseAdmin
+  return dbAdmin
     .from('user_profile')
     .update(payload)
     .eq('user_id', userId)

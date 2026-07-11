@@ -1,14 +1,14 @@
 ---
 name: resume-backend-node
 description: >-
-  AI简历助手 Node.js 后端项目指南（Express + Supabase + DeepSeek）。
+  AI简历助手 Node.js 后端项目指南（Express + PostgreSQL + DeepSeek）。
   在 resume-backend-node 目录编写/修改 API、鉴权、AI 服务、钱包计费、数据库迁移时使用。
   每次改动路由、表结构、权限或配置后须同步更新本 skill 与 reference.md。
 ---
 
 # resume-backend-node
 
-AI 简历助手校园版后端。Express 4 + Supabase Postgres/Auth + DeepSeek API。**计费模式：账户余额 + AI 按次扣费（已移除 VIP 会员体系）。**
+AI 简历助手校园版后端。Express 4 + PostgreSQL + JWT + DeepSeek API。**计费模式：账户余额 + AI 按次扣费（已移除 VIP 会员体系）。**
 
 ## 何时读取
 
@@ -22,15 +22,21 @@ AI 简历助手校园版后端。Express 4 + Supabase Postgres/Auth + DeepSeek A
 
 ```
 main.js              # 入口
+dbClient.js          # dbAdmin 数据库客户端
+lib/
+  db.js              # pg 连接池
+  pgCompat.js        # 链式查询兼容层
+  uploadPaths.js     # UPLOAD_DIR 上传路径
 routers/             # auth | ai | pdf | resume | wallet | admin | upload | feedback
 services/
   wallet/            # wallet.service.js 余额/扣费/调额
   ai/                # ai.service + ai.quota.service（余额校验+扣费）
 middlewares/         # auth | permission
 utils/               # permissions.js | ai_cost.js
-supabase/
-  schema.sql
-  migrations/20260709_token_billing.sql
+database/
+  init.sql           # 建表（20 张表）
+  TABLES.md          # 表中文对照
+  ops/               # 运维 SQL
 ```
 
 ## 技术约定
@@ -40,8 +46,9 @@ supabase/
 | 模块 | CommonJS |
 | 成功响应 | `{ success: true, data }` 或 `{ total, items }` |
 | 错误响应 | `{ detail, code? }` |
-| 用户 ID | Supabase UUID，`user_id` |
+| 用户 ID | UUID，`user_id` |
 | 权限 | `namespace:action`，如 `wallet:view_self` |
+| 上传目录 | `UPLOAD_DIR` 环境变量，生产建议 `/var/www/resume-uploads` |
 
 ## 鉴权流程
 

@@ -3,7 +3,7 @@
  * 提供日志记录、关键词清洗、用户画像附加、归属用户查询等通用能力
  */
 
-const { supabaseAdmin } = require('../../supabaseClient');
+const { dbAdmin } = require('../../dbClient');
 const { ROLES } = require('../../utils/permissions');
 
 /**
@@ -27,7 +27,7 @@ async function attachUserProfiles(items, userIdKey = 'user_id') {
   const userIds = [...new Set(items.map((item) => item[userIdKey]).filter(Boolean))];
   if (!userIds.length) return items;
 
-  const { data: profiles } = await supabaseAdmin
+  const { data: profiles } = await dbAdmin
     .from('user_profile')
     .select('user_id, nickname, email')
     .in('user_id', userIds);
@@ -49,7 +49,7 @@ async function attachUserProfiles(items, userIdKey = 'user_id') {
  * @returns {Promise<void>}
  */
 async function logAdminAction(req, action, targetType = '', targetId = '') {
-  await supabaseAdmin.from('admin_action_log').insert({
+  await dbAdmin.from('admin_action_log').insert({
     admin_user_id: req.user.id,
     action,
     target_type: targetType,
@@ -69,7 +69,7 @@ async function getOwnedUserIds(user) {
   if (user.role === ROLES.SUPER_ADMIN) {
     return null;
   }
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await dbAdmin
     .from('admin_user_relation')
     .select('user_id')
     .eq('admin_id', user.id);
@@ -91,7 +91,7 @@ async function canAccessUser(user, targetUserId) {
   if (user.role === ROLES.SUPER_ADMIN) {
     return true;
   }
-  const { data } = await supabaseAdmin
+  const { data } = await dbAdmin
     .from('admin_user_relation')
     .select('id')
     .eq('admin_id', user.id)

@@ -1,6 +1,6 @@
 /**
  * 认证路由模块
- * 基于 Supabase Auth 提供完整的认证功能：
+ * 基于 JWT 提供完整的认证功能：
  * 1. POST /api/auth/sendCode       - 发送邮箱验证码
  * 2. POST /api/auth/login          - 验证码登录（首次自动注册）
  * 3. POST /api/auth/register       - 邮箱验证码校验通过后设置用户名和密码
@@ -268,8 +268,7 @@ router.post(
 
 /**
  * 发送密码重置验证码接口
- * 复用 Supabase OTP 能力，向已注册邮箱发送 6 位数字验证码
- * 邮件内容由 Supabase Dashboard → Authentication → Templates → Magic Link 模板决定
+ * 向已注册邮箱发送 6 位数字验证码
  */
 router.post(
   '/resetPassword',

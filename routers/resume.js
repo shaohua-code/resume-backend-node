@@ -2,13 +2,13 @@
  * 简历路由模块
  * 挂载路径前缀：/api/resume
  * 职责：简历 CRUD、简历列表/详情、导出记录
- * 数据存储于 Supabase Postgres，通过 supabaseAdmin 客户端操作（绕过 RLS）
+ * 数据存储于 PostgreSQL，通过 dbAdmin 客户端操作
  *
- * Supabase 数据表约定：
+ * 数据表约定：
  * - resume         (id bigint pk, user_id uuid, title text, resume_json text, template_id int, score int, create_time timestamp, update_time timestamp)
  * - export_record  (id bigint pk, user_id uuid, resume_id bigint, create_time timestamp)
  *
- * 注意：user_id 在 Supabase 中是 uuid 类型，对应 auth.users.id
+ * 注意：user_id 为 uuid 类型，对应 users.id
  */
 
 const express = require('express');

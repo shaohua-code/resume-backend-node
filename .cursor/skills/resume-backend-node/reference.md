@@ -93,7 +93,7 @@ task_type 示例：`resume_generate`, `project_optimize`, `jd_match`, `score`, `
 | admin_action_log | admin_user_id, action, target_type/id |
 | user_feedback | content_html, content_md |
 
-迁移：`supabase/migrations/20260709_token_billing.sql`
+迁移：`database/init.sql`；表对照见 `database/TABLES.md`
 
 ## 权限（utils/permissions.js）
 

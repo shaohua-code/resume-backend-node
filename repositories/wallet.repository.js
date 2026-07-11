@@ -1,16 +1,16 @@
 /**
  * 钱包数据仓库
- * 封装 user_wallet、balance_ledger 表的 Supabase 访问
+ * 封装 user_wallet、balance_ledger 表的 PostgreSQL 访问
  */
 
-const { supabaseAdmin } = require('../supabaseClient')
+const { dbAdmin } = require('../dbClient')
 
 /**
  * 按用户 ID 查询钱包
  * @param {string} userId
  */
 async function findWalletByUserId(userId) {
-  return supabaseAdmin
+  return dbAdmin
     .from('user_wallet')
     .select('*')
     .eq('user_id', userId)
@@ -22,7 +22,7 @@ async function findWalletByUserId(userId) {
  * @param {Object} payload
  */
 async function createWallet(payload) {
-  return supabaseAdmin
+  return dbAdmin
     .from('user_wallet')
     .insert(payload)
     .select()
@@ -35,7 +35,7 @@ async function createWallet(payload) {
  * @param {Object} payload
  */
 async function updateWallet(userId, payload) {
-  return supabaseAdmin
+  return dbAdmin
     .from('user_wallet')
     .update(payload)
     .eq('user_id', userId)
@@ -50,7 +50,7 @@ async function updateWallet(userId, payload) {
  * @param {number} to
  */
 async function listLedgerByUser(userId, from, to) {
-  return supabaseAdmin
+  return dbAdmin
     .from('balance_ledger')
     .select('*', { count: 'exact' })
     .eq('user_id', userId)
@@ -66,10 +66,10 @@ async function listLedgerByUser(userId, from, to) {
  * @param {string} [params.userId] - 单用户筛选
  * @param {string} [params.type] - 类型筛选
  * @param {string[]|null} [params.userIds] - 多用户筛选（归属过滤）；null 不过滤
- * @returns {Promise<Object>} Supabase 查询结果
+ * @returns {Promise<Object>} PostgreSQL 查询结果
  */
 async function listLedger({ from, to, userId, type, userIds }) {
-  let query = supabaseAdmin
+  let query = dbAdmin
     .from('balance_ledger')
     .select('*', { count: 'exact' })
     .order('create_time', { ascending: false })
@@ -93,10 +93,10 @@ async function listLedger({ from, to, userId, type, userIds }) {
 /**
  * 查询管理员额度池
  * @param {string} adminId
- * @returns {Promise<Object>} Supabase 查询结果
+ * @returns {Promise<Object>} PostgreSQL 查询结果
  */
 async function findQuotaPool(adminId) {
-  return supabaseAdmin
+  return dbAdmin
     .from('admin_quota_pool')
     .select('*')
     .eq('admin_id', adminId)
@@ -108,7 +108,7 @@ async function findQuotaPool(adminId) {
  * @param {Object} payload
  */
 async function createQuotaPool(payload) {
-  return supabaseAdmin
+  return dbAdmin
     .from('admin_quota_pool')
     .insert(payload)
     .select()
@@ -121,7 +121,7 @@ async function createQuotaPool(payload) {
  * @param {Object} payload
  */
 async function updateQuotaPool(adminId, payload) {
-  return supabaseAdmin
+  return dbAdmin
     .from('admin_quota_pool')
     .update(payload)
     .eq('admin_id', adminId)
@@ -137,7 +137,7 @@ async function updateQuotaPool(adminId, payload) {
  * @returns {Promise<number>} 实付金额合计
  */
 async function sumPaidAmount({ operatorId, userIds }) {
-  let query = supabaseAdmin
+  let query = dbAdmin
     .from('balance_ledger')
     .select('paid_amount')
     .in('type', ['ADMIN_GRANT', 'ADMIN_ALLOCATE', 'ADMIN_POOL_GRANT'])
@@ -159,7 +159,7 @@ async function sumPaidAmount({ operatorId, userIds }) {
  * @param {Object} payload
  */
 async function insertLedger(payload) {
-  return supabaseAdmin
+  return dbAdmin
     .from('balance_ledger')
     .insert(payload)
     .select()
@@ -174,7 +174,7 @@ async function findWalletsByUserIds(userIds) {
   if (!userIds.length) {
     return { data: [], error: null }
   }
-  return supabaseAdmin
+  return dbAdmin
     .from('user_wallet')
     .select('*')
     .in('user_id', userIds)

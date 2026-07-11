@@ -67,5 +67,9 @@ coverage.xml
 *.bak
 *.orig
 
+# ========== 上传文件（独立于 Git 仓库）==========
+uploads/
+data/uploads/
+
 # ========== 环境变量示例文件（含真实密钥，禁止上传）==========
 .env.example

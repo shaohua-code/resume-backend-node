@@ -3,7 +3,7 @@
  * 管理员生成邀请链接，用户通过链接注册时绑定归属关系
  */
 
-const { supabaseAdmin } = require('../../supabaseClient')
+const { dbAdmin } = require('../../dbClient')
 const crypto = require('crypto')
 
 /**
@@ -20,7 +20,7 @@ function generateInviteCode() {
  * @returns {Promise<Object>} 邀请链接列表
  */
 async function listInviteLinks(req) {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await dbAdmin
     .from('invite_link')
     .select('*')
     .eq('admin_id', req.user.id)
@@ -43,7 +43,7 @@ async function createInviteLink(req) {
   const code = generateInviteCode()
   const now = new Date().toISOString()
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await dbAdmin
     .from('invite_link')
     .insert({
       admin_id: req.user.id,
@@ -78,7 +78,7 @@ async function updateInviteLink(req) {
     throw Object.assign(new Error('无更新字段'), { statusCode: 400 })
   }
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await dbAdmin
     .from('invite_link')
     .update(payload)
     .eq('id', id)
@@ -102,7 +102,7 @@ async function updateInviteLink(req) {
  */
 async function deleteInviteLink(req) {
   const { id } = req.params
-  const { error } = await supabaseAdmin
+  const { error } = await dbAdmin
     .from('invite_link')
     .delete()
     .eq('id', id)
@@ -122,7 +122,7 @@ async function deleteInviteLink(req) {
 async function validateInviteCode(code) {
   if (!code) return null
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await dbAdmin
     .from('invite_link')
     .select('admin_id, status, expire_time')
     .eq('code', code)
@@ -145,7 +145,7 @@ async function validateInviteCode(code) {
  */
 async function incrementUsedCount(code) {
   if (!code) return
-  const { data: link } = await supabaseAdmin
+  const { data: link } = await dbAdmin
     .from('invite_link')
     .select('used_count')
     .eq('code', code)
@@ -153,7 +153,7 @@ async function incrementUsedCount(code) {
 
   if (!link) return
 
-  await supabaseAdmin
+  await dbAdmin
     .from('invite_link')
     .update({ used_count: (link.used_count || 0) + 1 })
     .eq('code', code)
@@ -166,7 +166,7 @@ async function incrementUsedCount(code) {
  */
 async function bindUserRelation(userId, adminId) {
   const now = new Date().toISOString()
-  const { error } = await supabaseAdmin.from('admin_user_relation').insert({
+  const { error } = await dbAdmin.from('admin_user_relation').insert({
     admin_id: adminId,
     user_id: userId,
     bind_type: 'INVITE_LINK',

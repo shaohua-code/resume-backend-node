@@ -1,9 +1,9 @@
 /**
  * AI 调用记录数据仓库
- * 封装所有与 Supabase ai_call_record 表直接交互的操作
+ * 封装所有与 PostgreSQL ai_call_record 表直接交互的操作
  */
 
-const { supabaseAdmin } = require('../supabaseClient');
+const { dbAdmin } = require('../dbClient');
 
 /**
  * 按条件统计 AI 调用数量
@@ -11,7 +11,7 @@ const { supabaseAdmin } = require('../supabaseClient');
  * @returns {Promise<number>} AI 调用数量
  */
 async function countAiCalls(builder) {
-  let query = supabaseAdmin.from('ai_call_record').select('*', { count: 'exact', head: true });
+  let query = dbAdmin.from('ai_call_record').select('*', { count: 'exact', head: true });
   if (builder) {
     query = builder(query);
   }
@@ -27,10 +27,10 @@ async function countAiCalls(builder) {
  * @param {string} [params.userId] - 按用户 ID 过滤
  * @param {string} [params.taskType] - 按任务类型过滤
  * @param {string[]|null} [params.userIds] - 按用户 ID 列表过滤（归属过滤）；null 表示不过滤
- * @returns {Promise<Object>} Supabase 查询结果 { data, error, count }
+ * @returns {Promise<Object>} PostgreSQL 查询结果 { data, error, count }
  */
 async function listAiCalls({ from, to, userId, taskType, userIds }) {
-  let query = supabaseAdmin
+  let query = dbAdmin
     .from('ai_call_record')
     .select('*', { count: 'exact' })
     .order('create_time', { ascending: false })
@@ -54,10 +54,10 @@ async function listAiCalls({ from, to, userId, taskType, userIds }) {
 /**
  * 查询指定时间之后的所有 AI 调用记录，用于趋势统计
  * @param {string} yearStart - 起始时间 ISO 字符串
- * @returns {Promise<Object>} Supabase 查询结果 { data, error }
+ * @returns {Promise<Object>} PostgreSQL 查询结果 { data, error }
  */
 async function findAllAiCalls(yearStart) {
-  return supabaseAdmin
+  return dbAdmin
     .from('ai_call_record')
     .select('create_time')
     .gte('create_time', yearStart);
@@ -66,10 +66,10 @@ async function findAllAiCalls(yearStart) {
 /**
  * 查询最近的 AI 调用任务类型分布
  * @param {number} limit - 查询条数
- * @returns {Promise<Object>} Supabase 查询结果 { data, error }
+ * @returns {Promise<Object>} PostgreSQL 查询结果 { data, error }
  */
 async function findRecentTaskTypes(limit = 500) {
-  return supabaseAdmin
+  return dbAdmin
     .from('ai_call_record')
     .select('task_type')
     .order('create_time', { ascending: false })

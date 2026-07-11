@@ -6,7 +6,7 @@
 const { canManageRole, ROLES } = require('../../utils/permissions');
 const userRepo = require('../../repositories/user.repository');
 const { sanitizeKeyword, logAdminAction, getOwnedUserIds, canAccessUser } = require('./admin.common.service');
-const { supabaseAdmin } = require('../../supabaseClient');
+const { dbAdmin } = require('../../dbClient');
 
 /**
  * 分页查询用户列表
@@ -45,7 +45,7 @@ async function listUsers(req, from, to) {
 
     if (adminIds.length > 0) {
       // 查询每个管理员在 admin_user_relation 表中的关联用户数
-      const { data: relationCounts, error: countError } = await supabaseAdmin
+      const { data: relationCounts, error: countError } = await dbAdmin
         .from('admin_user_relation')
         .select('admin_id')
         .in('admin_id', adminIds);
@@ -191,7 +191,7 @@ async function claimUser(req) {
   }
 
   // 校验该用户未被认领
-  const { data: existing } = await supabaseAdmin
+  const { data: existing } = await dbAdmin
     .from('admin_user_relation')
     .select('id, admin_id')
     .eq('user_id', target.user_id)
@@ -203,7 +203,7 @@ async function claimUser(req) {
 
   // 写入归属关系
   const now = new Date().toISOString();
-  const { error: insertError } = await supabaseAdmin.from('admin_user_relation').insert({
+  const { error: insertError } = await dbAdmin.from('admin_user_relation').insert({
     admin_id: req.user.id,
     user_id: target.user_id,
     bind_type: 'EMAIL_CLAIM',

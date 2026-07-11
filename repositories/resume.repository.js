@@ -1,9 +1,9 @@
 /**
  * 简历数据仓库
- * 封装所有与 Supabase resume 表直接交互的操作
+ * 封装所有与 PostgreSQL resume 表直接交互的操作
  */
 
-const { supabaseAdmin } = require('../supabaseClient');
+const { dbAdmin } = require('../dbClient');
 
 function serializeResumeJson(resumeJson) {
   if (typeof resumeJson === 'object' && resumeJson !== null) {
@@ -30,7 +30,7 @@ async function createResume(userId, body) {
     create_time: now,
     update_time: now,
   };
-  return supabaseAdmin.from('resume').insert(payload).select().single();
+  return dbAdmin.from('resume').insert(payload).select().single();
 }
 
 async function updateResume(userId, resumeId, body) {
@@ -38,7 +38,7 @@ async function updateResume(userId, resumeId, body) {
     ...buildResumePayload(body),
     update_time: new Date().toISOString(),
   };
-  return supabaseAdmin
+  return dbAdmin
     .from('resume')
     .update(payload)
     .eq('id', resumeId)
@@ -48,7 +48,7 @@ async function updateResume(userId, resumeId, body) {
 }
 
 async function findById(userId, resumeId) {
-  return supabaseAdmin
+  return dbAdmin
     .from('resume')
     .select('*')
     .eq('id', resumeId)
@@ -57,13 +57,13 @@ async function findById(userId, resumeId) {
 }
 
 async function findByIdAdmin(resumeId) {
-  return supabaseAdmin.from('resume').select('*').eq('id', resumeId).single();
+  return dbAdmin.from('resume').select('*').eq('id', resumeId).single();
 }
 
 async function listByUser(userId, page, size) {
   const from = (page - 1) * size;
   const to = from + size - 1;
-  return supabaseAdmin
+  return dbAdmin
     .from('resume')
     .select('*', { count: 'exact' })
     .eq('user_id', userId)
@@ -72,7 +72,7 @@ async function listByUser(userId, page, size) {
 }
 
 async function deleteResume(userId, resumeId) {
-  return supabaseAdmin
+  return dbAdmin
     .from('resume')
     .delete()
     .eq('id', resumeId)
@@ -82,7 +82,7 @@ async function deleteResume(userId, resumeId) {
 
 // 批量删除简历（仅删除当前用户的数据）
 async function deleteMany(userId, resumeIds) {
-  return supabaseAdmin
+  return dbAdmin
     .from('resume')
     .delete()
     .in('id', resumeIds)
@@ -92,7 +92,7 @@ async function deleteMany(userId, resumeIds) {
 
 // 统计当前用户的简历总数（head 模式，不返回数据）
 async function countByUser(userId) {
-  return supabaseAdmin
+  return dbAdmin
     .from('resume')
     .select('*', { count: 'exact', head: true })
     .eq('user_id', userId);
@@ -100,7 +100,7 @@ async function countByUser(userId) {
 
 // 查询当前用户最早创建的简历（用于超限替换）
 async function findOldestByUser(userId) {
-  return supabaseAdmin
+  return dbAdmin
     .from('resume')
     .select('id')
     .eq('user_id', userId)
@@ -110,7 +110,7 @@ async function findOldestByUser(userId) {
 }
 
 async function listAdmin({ from, to, userId, userIds }) {
-  let query = supabaseAdmin
+  let query = dbAdmin
     .from('resume')
     .select('id,user_id,title,template_id,score,create_time,update_time', { count: 'exact' })
     .order('update_time', { ascending: false })
