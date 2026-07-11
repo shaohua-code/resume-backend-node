@@ -544,12 +544,12 @@ psql -h 127.0.0.1 -U ai_resume -d ai_resume
 ```sql
 UPDATE public.user_profile
 SET role = 'SUPER_ADMIN', status = 'ACTIVE', update_time = now()
-WHERE email = '你的注册邮箱@163.com';
+WHERE email = 'shaohua_code@163.com';
 
 INSERT INTO public.admin_quota_pool (admin_id, total_quota, allocated_quota, update_time)
 SELECT user_id, 1000000, 0, now()
 FROM public.user_profile
-WHERE email = '你的注册邮箱@163.com'
+WHERE email = 'shaohua_code@163.com'
 ON CONFLICT (admin_id) DO NOTHING;
 ```
 
