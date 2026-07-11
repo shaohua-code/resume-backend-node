@@ -22,11 +22,14 @@ jobs:
 
         with:
 
-          host: ${{ secrets.SERVER_HOST }}
+          host: ${{ secrets.SERVER_IP }}
 
-          username: ${{ secrets.SERVER_USER }}
+          username: ${{ secrets.SSH_USER }}
 
-          key: ${{ secrets.SERVER_SSH_KEY }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+          port: 22 # 建议加上端口，避免默认端口异常
+
 
           script: |
 
