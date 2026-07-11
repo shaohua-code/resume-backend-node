@@ -33,6 +33,10 @@ const settings = {
   DEEPSEEK_MODEL_JD_MATCH: process.env.DEEPSEEK_MODEL_JD_MATCH || '',
   DEEPSEEK_MODEL_SCORE: process.env.DEEPSEEK_MODEL_SCORE || '',
   DEEPSEEK_MODEL_PDF_OPTIMIZE: process.env.DEEPSEEK_MODEL_PDF_OPTIMIZE || '',
+  // JD 岗位描述流式优化简历（缺省复用 PDF 优化模型）
+  DEEPSEEK_MODEL_JD_RESUME_OPTIMIZE: process.env.DEEPSEEK_MODEL_JD_RESUME_OPTIMIZE || '',
+  // JD 图片 OCR 提取（多模态视觉模型）
+  DEEPSEEK_MODEL_VISION: process.env.DEEPSEEK_MODEL_VISION || '',
 
   CORS_ORIGINS: (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:3000')
     .split(',')

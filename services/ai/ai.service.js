@@ -23,6 +23,9 @@ const {
   JD_MATCH_PROMPT,
   SCORE_PROMPT,
   PDF_OPTIMIZE_PROMPT,
+  JD_RESUME_OPTIMIZE_PROMPT,
+  PDF_JD_OPTIMIZE_PROMPT,
+  JD_IMAGE_EXTRACT_PROMPT,
   format,
 } = require('./ai.prompts');
 
@@ -139,6 +142,50 @@ async function callDeepseekStream(prompt, options = {}, onChunk) {
     });
     response.data.on('error', reject);
   });
+}
+
+/**
+ * 多模态视觉调用：从图片提取文本（非流式）
+ * @param {Buffer} imageBuffer 图片二进制
+ * @param {string} mimeType 如 image/jpeg
+ */
+async function callDeepseekVision(imageBuffer, mimeType, textPrompt, options = {}) {
+  if (!settings.DEEPSEEK_API_KEY || !settings.DEEPSEEK_API_KEY.trim()) {
+    const err = new Error('DeepSeek API Key 未配置！');
+    err.code = 'CONFIG_MISSING';
+    throw err;
+  }
+  const model = resolveModel(options.task, options.model);
+  const base64 = imageBuffer.toString('base64');
+  const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${base64}`;
+  const headers = {
+    Authorization: `Bearer ${settings.DEEPSEEK_API_KEY.trim()}`,
+    'Content-Type': 'application/json',
+  };
+  const payload = {
+    model,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'text', text: textPrompt },
+        { type: 'image_url', image_url: { url: dataUrl } },
+      ],
+    }],
+    temperature: 0.3,
+    max_tokens: 4096,
+  };
+  const response = await axios.post(settings.DEEPSEEK_API_URL, payload, {
+    headers,
+    timeout: 90000,
+  });
+  const usage = normalizeUsage(response.data.usage || {});
+  const cost = await calcAiCost(model, usage);
+  return {
+    content: response.data.choices[0].message.content,
+    usage,
+    model,
+    cost,
+  };
 }
 
 // ========== 简历数据规范化工具 ==========
@@ -515,6 +562,23 @@ async function optimizeFromPdfText(pdfText, targetPosition = '', options = {}) {
 }
 
 /**
+ * 从 JD 图片中提取岗位描述文本（OCR/视觉模型）
+ */
+async function extractJdFromImage(imageBuffer, mimeType = 'image/jpeg', options = {}) {
+  const { content, usage, model, cost } = await callDeepseekVision(
+    imageBuffer,
+    mimeType,
+    JD_IMAGE_EXTRACT_PROMPT,
+    { task: AI_TASK.JD_IMAGE_EXTRACT, model: options.model },
+  );
+  const jdText = String(content || '').trim();
+  return {
+    data: { jd_text: jdText },
+    meta: { model, usage, cost },
+  };
+}
+
+/**
  * 流式 PDF 简历优化
  */
 async function optimizeFromPdfTextStream(pdfText, targetPosition = '', options = {}, onChunk) {
@@ -541,6 +605,66 @@ async function optimizeFromPdfTextStream(pdfText, targetPosition = '', options =
   };
 }
 
+/**
+ * 基于 PDF 原文 + 岗位 JD 流式优化简历（Upload 模式）
+ */
+async function optimizePdfByJdStream(pdfText, jdText = '', options = {}, onChunk) {
+  const prompt = format(PDF_JD_OPTIMIZE_PROMPT, {
+    pdf_text: pdfText || '',
+    jd_text: jdText || '',
+  });
+  const { content, usage, model, cost } = await callDeepseekStream(
+    prompt,
+    { task: AI_TASK.PDF_JD_OPTIMIZE, model: options.model },
+    onChunk,
+  );
+  const parsed = extractJson(content);
+  if (!parsed || Object.keys(parsed).length === 0) {
+    return { data: { resume: {}, optimization_notes: [] }, meta: { model, usage, cost } };
+  }
+  const rawResume = parsed.resume && typeof parsed.resume === 'object' ? parsed.resume : parsed;
+  const resume = normalizePdfResume(rawResume);
+  return {
+    data: {
+      resume: hasResumeContent(resume) ? resume : {},
+      optimization_notes: parsed.optimization_notes || [],
+    },
+    meta: { model, usage, cost },
+  };
+}
+
+/**
+ * 基于岗位 JD 流式优化整份简历
+ * @param {object} resumeJson 当前简历对象
+ * @param {string} jdText 岗位 JD 文本
+ */
+async function optimizeResumeByJdStream(resumeJson, jdText = '', options = {}, onChunk) {
+  const resumeStr = typeof resumeJson === 'string' ? resumeJson : JSON.stringify(resumeJson || {});
+  const prompt = format(JD_RESUME_OPTIMIZE_PROMPT, {
+    jd_text: jdText || '',
+    resume_json: resumeStr,
+  });
+  const { content, usage, model, cost } = await callDeepseekStream(
+    prompt,
+    { task: AI_TASK.JD_RESUME_OPTIMIZE, model: options.model },
+    onChunk,
+  );
+  const parsed = extractJson(content);
+  if (!parsed || Object.keys(parsed).length === 0) {
+    return { data: { resume: {}, optimization_notes: [] }, meta: { model, usage, cost } };
+  }
+  // 兼容 AI 直接返回 resume 根对象或嵌套在 resume 字段内
+  const rawResume = parsed.resume && typeof parsed.resume === 'object' ? parsed.resume : parsed;
+  const resume = normalizePdfResume(rawResume);
+  return {
+    data: {
+      resume: hasResumeContent(resume) ? resume : {},
+      optimization_notes: parsed.optimization_notes || [],
+    },
+    meta: { model, usage, cost },
+  };
+}
+
 module.exports = {
   generateResume,
   generateResumeStream,
@@ -553,4 +677,7 @@ module.exports = {
   scoreResume,
   optimizeFromPdfText,
   optimizeFromPdfTextStream,
+  optimizePdfByJdStream,
+  optimizeResumeByJdStream,
+  extractJdFromImage,
 };

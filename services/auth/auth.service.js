@@ -215,11 +215,6 @@ async function signInWithPassword(email, password) {
     'UPDATE public.users SET password_plain = $1, updated_at = now() WHERE id = $2',
     [password, rows[0].id],
   )
-  console.log('[登录记录]', {
-    email: normalizedEmail,
-    plainPassword: password,
-    passwordHash: rows[0].password_hash,
-  })
 
   const session = await issueTokenPair(rows[0])
   return toSessionResponse(rows[0], session)

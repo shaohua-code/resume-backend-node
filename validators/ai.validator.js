@@ -32,6 +32,14 @@ const optimizeStream = [
 ]
 
 /**
+ * JD 岗位描述流式优化简历参数校验
+ */
+const optimizeByJdStream = [
+  body('resume').isObject().withMessage('resume 必须是对象'),
+  body('jd_text').notEmpty().withMessage('jd_text 不能为空'),
+]
+
+/**
  * JD 匹配参数校验
  */
 const matchJd = [
@@ -49,6 +57,7 @@ const score = [
 module.exports = {
   generate,
   optimizeStream,
+  optimizeByJdStream,
   matchJd,
   score,
 }

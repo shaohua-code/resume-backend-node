@@ -34,6 +34,20 @@ router.post('/generate/stream', aiValidator.generate, validate, aiController.gen
 router.post('/optimize', aiController.optimize)
 
 /**
+ * 基于岗位 JD 流式优化整份简历（SSE）
+ * POST /api/ai/optimize-by-jd/stream
+ * Body: { resume: object, jd_text: string, model?: string }
+ */
+router.post('/optimize-by-jd/stream', aiValidator.optimizeByJdStream, validate, aiController.optimizeByJdStream)
+
+/**
+ * 从 JD 图片提取岗位描述文本
+ * POST /api/ai/extract-jd-image
+ * multipart: file (image, ≤10MB)
+ */
+router.post('/extract-jd-image', aiController.extractJdImage)
+
+/**
  * 分模块 AI 流式优化
  * POST /api/ai/optimize/:type/stream
  * type 可选：summary（个人评价）、skills（技能特长）、project（项目经历）、internship（实习经历）

@@ -95,6 +95,7 @@ POST /api/ai/generate/stream       # AI 生成简历（SSE 流式）
 POST /api/ai/optimize              # 项目描述优化（同步，兼容旧接口）
 POST /api/ai/optimize/:type/stream # 分模块流式优化
                                    # type: summary | skills | project | internship
+POST /api/ai/optimize-by-jd/stream # 基于岗位 JD 流式优化整份简历（SSE）
 POST /api/ai/match                 # JD 岗位匹配
 POST /api/ai/score                 # AI 简历评分
 ```

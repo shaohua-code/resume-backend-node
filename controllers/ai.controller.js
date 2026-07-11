@@ -7,6 +7,19 @@ const aiService = require('../services/ai/ai.service');
 const resumeRepo = require('../repositories/resume.repository');
 const { ensureAiQuota, recordAiCall } = require('../services/ai/ai.quota.service');
 const { success, error } = require('../utils/response');
+const multer = require('multer');
+
+// JD 图片 OCR：内存存储，不落盘
+const jdImageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype || !file.mimetype.startsWith('image/')) {
+      return cb(new Error('仅支持图片文件（image/*）'));
+    }
+    cb(null, true);
+  },
+});
 
 function getRequestedModel(req) {
   return (req.body && req.body.model) || req.query.model || '';
@@ -137,6 +150,82 @@ async function optimize(req, res) {
   }
 }
 
+async function optimizeByJdStream(req, res) {
+  const taskType = 'jd_resume_optimize';
+  const model = getRequestedModel(req);
+  const { resume, jd_text: jdText } = req.body || {};
+
+  if (!resume || typeof resume !== 'object') {
+    return error(res, 400, 'resume 必须是对象');
+  }
+  if (!jdText || !String(jdText).trim()) {
+    return error(res, 400, 'jd_text 不能为空');
+  }
+
+  const sendEvent = setupSSE(res);
+  try {
+    await ensureAiQuota(req, taskType);
+    const { data, meta } = await aiService.optimizeResumeByJdStream(
+      resume,
+      String(jdText).trim(),
+      { model },
+      (chunk) => {
+        sendEvent({ chunk });
+      },
+    );
+    if (!data?.resume || Object.keys(data.resume).length === 0) {
+      await recordAiCall(req, taskType, model, false, 'AI优化失败，请重试');
+      sendEvent({ error: 'AI优化失败，请重试' });
+      return res.end();
+    }
+    await recordAiCall(req, taskType, model, true, '', meta);
+    sendEvent({ done: true, data });
+    return res.end();
+  } catch (e) {
+    return respondAiError(res, e, {
+      sendEvent,
+      recordFn: (msg) => recordAiCall(req, taskType, model, false, msg),
+    });
+  }
+}
+
+/**
+ * 从 JD 图片中提取岗位描述文本（OCR / 视觉模型）
+ * POST /api/ai/extract-jd-image
+ */
+async function extractJdImage(req, res) {
+  const taskType = 'jd_image_extract';
+  const model = getRequestedModel(req);
+  jdImageUpload.single('file')(req, res, async (uploadErr) => {
+    if (uploadErr) {
+      return error(res, 400, uploadErr.message || '图片上传失败');
+    }
+    if (!req.file || !req.file.buffer) {
+      return error(res, 400, '请上传 JD 图片（字段名：file）');
+    }
+    try {
+      await ensureAiQuota(req, taskType);
+      const { data, meta } = await aiService.extractJdFromImage(
+        req.file.buffer,
+        req.file.mimetype,
+        { model },
+      );
+      if (!data?.jd_text) {
+        await recordAiCall(req, taskType, model, false, '未能从图片中提取 JD 内容');
+        return error(res, 500, '未能从图片中提取 JD 内容，请换一张更清晰的图片或改用文本粘贴');
+      }
+      await recordAiCall(req, taskType, model, true, '', meta);
+      return success(res, data, 'JD 提取完成');
+    } catch (e) {
+      if (e.code === 'CONFIG_MISSING') return error(res, 400, e.message);
+      if (e.code === 'AI_LIMIT_EXCEEDED') return error(res, 403, e.message);
+      await recordAiCall(req, taskType, model, false, e.message);
+      console.error('[extractJdImage] error:', e);
+      return error(res, e.statusCode || 500, `提取失败：${e.message}`);
+    }
+  });
+}
+
 async function optimizeStream(req, res) {
   const type = req.params.type;
   const allowedTypes = ['summary', 'skills', 'project', 'internship'];
@@ -241,6 +330,8 @@ module.exports = {
   generate,
   generateStream,
   optimize,
+  optimizeByJdStream,
+  extractJdImage,
   optimizeStream,
   matchJd,
   score,

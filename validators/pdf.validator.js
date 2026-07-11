@@ -20,7 +20,23 @@ const existingOptimize = [
   body('target_position').optional().isString().withMessage('target_position 必须是字符串'),
 ]
 
+/**
+ * PDF + JD 流式优化参数校验（文件由 multer 处理）
+ */
+const uploadOptimizeByJd = [
+  body('jd_text').notEmpty().withMessage('jd_text 不能为空'),
+]
+
+/**
+ * 已有 PDF + JD 流式优化参数校验
+ */
+const existingOptimizeByJd = [
+  body('jd_text').notEmpty().withMessage('jd_text 不能为空'),
+]
+
 module.exports = {
   uploadOptimize,
   existingOptimize,
+  uploadOptimizeByJd,
+  existingOptimizeByJd,
 }

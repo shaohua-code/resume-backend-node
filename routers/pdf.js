@@ -40,6 +40,18 @@ router.post('/uploadOptimize/existing', pdfValidator.existingOptimize, validate,
 router.post('/uploadOptimize/existing/stream', pdfValidator.existingOptimize, validate, pdfController.existingOptimizeStream)
 
 /**
+ * 上传 PDF 并由 AI 根据岗位 JD 流式优化（SSE）
+ * POST /api/pdf/uploadOptimizeByJd/stream
+ */
+router.post('/uploadOptimizeByJd/stream', pdfValidator.uploadOptimizeByJd, validate, pdfController.uploadOptimizeByJdStream)
+
+/**
+ * 使用已上传 PDF 根据岗位 JD 流式优化（SSE）
+ * POST /api/pdf/uploadOptimizeByJd/existing/stream
+ */
+router.post('/uploadOptimizeByJd/existing/stream', pdfValidator.existingOptimizeByJd, validate, pdfController.existingOptimizeByJdStream)
+
+/**
  * 获取当前用户已上传 PDF 元信息
  * GET /api/pdf/uploadedFile
  */
