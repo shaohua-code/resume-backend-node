@@ -1,194 +1,248 @@
 /**
  * 认证服务模块
- * 基于 Supabase Auth 实现三种认证方式：
- * 1. 邮箱验证码（OTP）登录 - signInWithOtp + verifyOtp
- * 2. 邮箱验证码通过后设置密码注册 / 邮箱或用户名 + 密码登录
- * 3. 密码重置 - resetPasswordForEmail + updateUser
- *
- * 用户表由 Supabase Auth 自动维护（auth.users 表），无需自己管理用户注册流程
+ * 自研 JWT + bcrypt + QQ SMTP 邮箱验证码
+ * 替代原 Supabase Auth
  */
 
-const { supabaseAuth, supabaseAdmin } = require('../../supabaseClient');
+const bcrypt = require('bcryptjs')
+const crypto = require('crypto')
+const db = require('../../lib/db')
+const { verifyAccessToken, issueTokenPair, refreshTokenPair } = require('../../lib/jwt')
+const { sendOtpEmail } = require('../../lib/email')
+const { pgAdmin } = require('../../lib/pgCompat')
+
+const OTP_EXPIRE_MINUTES = 10
+const BCRYPT_ROUNDS = 10
+
+/** 生成 6 位数字验证码 */
+function generateOtpCode() {
+  return String(crypto.randomInt(100000, 999999))
+}
+
+/** 构造与 Supabase 兼容的 user 对象 */
+function toAuthUser(row, nickname) {
+  return {
+    id: row.id,
+    email: row.email,
+    user_metadata: {
+      nickname: nickname || row.nickname || (row.email ? row.email.split('@')[0] : '用户'),
+      username: nickname || row.nickname || '',
+    },
+  }
+}
+
+/** 构造 session 响应 */
+function toSessionResponse(user, session) {
+  return {
+    user: toAuthUser(user, user.nickname),
+    session: {
+      access_token: session.access_token,
+      refresh_token: session.refresh_token,
+      expires_at: session.expires_at,
+    },
+  }
+}
 
 /**
- * 发送邮箱验证码（OTP）
- * Supabase 会调用其内置的邮件服务发送 6 位数字验证码
- * 如果用户不存在，shouldCreateUser=true 会自动注册（首次登录）
- *
- * 重要：邮件内容是"验证码"还是"魔法链接"，由 Supabase 后台邮件模板决定！
- * - 模板包含 {{ .Token }}    → 邮件显示 6 位数字验证码
- * - 模板包含 {{ .ConfirmationURL }} → 邮件显示登录链接
- * 配置路径：Supabase Dashboard → Authentication → Email Templates → Magic Link
+ * 发送邮箱验证码（内部）
+ * @param {string} email
+ * @param {string} type login | register | reset
+ * @param {boolean} allowCreate 是否允许未注册邮箱
  */
+async function sendOtpInternal(email, type = 'login', allowCreate = true) {
+  const normalizedEmail = String(email || '').trim().toLowerCase()
+  const { rows: existing } = await db.query(
+    'SELECT id FROM public.users WHERE email = $1 LIMIT 1',
+    [normalizedEmail],
+  )
+
+  if (!allowCreate && !existing.length) {
+    return { success: true }
+  }
+
+  const code = generateOtpCode()
+  const expiresAt = new Date(Date.now() + OTP_EXPIRE_MINUTES * 60 * 1000).toISOString()
+
+  await db.query(
+    'UPDATE public.otp_codes SET used = true WHERE email = $1 AND type = $2 AND used = false',
+    [normalizedEmail, type],
+  )
+  await db.query(
+    'INSERT INTO public.otp_codes (email, code, type, expires_at) VALUES ($1, $2, $3, $4)',
+    [normalizedEmail, code, type, expiresAt],
+  )
+
+  await sendOtpEmail(normalizedEmail, code, type)
+  return { success: true }
+}
+
+/** 校验验证码 */
+async function verifyOtpCode(email, token, type = 'login') {
+  const normalizedEmail = String(email || '').trim().toLowerCase()
+  const { rows } = await db.query(
+    `SELECT * FROM public.otp_codes
+     WHERE email = $1 AND code = $2 AND type = $3 AND used = false AND expires_at > now()
+     ORDER BY created_at DESC LIMIT 1`,
+    [normalizedEmail, String(token || '').trim(), type],
+  )
+
+  if (!rows.length) {
+    const err = new Error('验证码错误或已过期')
+    err.statusCode = 400
+    throw err
+  }
+
+  await db.query('UPDATE public.otp_codes SET used = true WHERE id = $1', [rows[0].id])
+  return true
+}
+
+/** 查找或创建用户 */
+async function findOrCreateUser(email) {
+  const normalizedEmail = String(email || '').trim().toLowerCase()
+  let { rows } = await db.query('SELECT * FROM public.users WHERE email = $1 LIMIT 1', [normalizedEmail])
+
+  if (!rows.length) {
+    const { rows: created } = await db.query(
+      `INSERT INTO public.users (email, email_verified, created_at, updated_at)
+       VALUES ($1, true, now(), now()) RETURNING *`,
+      [normalizedEmail],
+    )
+    rows = created
+  } else {
+    await db.query(
+      'UPDATE public.users SET email_verified = true, updated_at = now() WHERE id = $1',
+      [rows[0].id],
+    )
+  }
+
+  return rows[0]
+}
+
+/** 发送邮箱验证码（对外） */
 async function sendOtp(email) {
-  const { data, error } = await supabaseAuth.auth.signInWithOtp({
-    email,
-    options: {
-      shouldCreateUser: true, // 用户不存在时自动注册（首次登录）
-      // 不设置 emailRedirectTo，让 Supabase 优先发送验证码而非跳转链接
-      // 如果项目站点 URL 在 Supabase 后台已配置，留空即可
-      emailRedirectTo: undefined,
-    },
-  });
-  if (error) throw error;
-  return data;
+  return sendOtpInternal(email, 'login', true)
 }
 
-/**
- * 校验邮箱验证码并完成登录
- * 成功后返回 Supabase 签发的 session（含 access_token、refresh_token、user）
- * @param {string} email 用户邮箱
- * @param {string} token 6位验证码
- */
+/** 校验邮箱验证码并完成登录 */
 async function verifyOtp(email, token) {
-  const { data, error } = await supabaseAuth.auth.verifyOtp({
-    email,
-    token,
-    type: 'email', // 邮箱 OTP 类型
-  });
-  if (error) throw error;
-  return data; // { user, session }
+  await verifyOtpCode(email, token, 'login')
+  const userRow = await findOrCreateUser(email)
+  const session = await issueTokenPair(userRow)
+  return toSessionResponse(userRow, session)
 }
 
-/**
- * 通过 access_token 获取当前用户信息
- * 用于后续受保护接口的鉴权
- */
+/** 通过 access_token 获取当前用户 */
 async function getUserByToken(accessToken) {
-  const { data, error } = await supabaseAuth.auth.getUser(accessToken);
-  if (error) return null;
-  return data.user;
+  const payload = verifyAccessToken(accessToken)
+  if (!payload?.sub) return null
+
+  const { rows } = await db.query(
+    `SELECT u.*, p.nickname FROM public.users u
+     LEFT JOIN public.user_profile p ON p.user_id = u.id
+     WHERE u.id = $1 LIMIT 1`,
+    [payload.sub],
+  )
+  if (!rows.length) return null
+  return toAuthUser(rows[0], rows[0].nickname)
 }
 
-/**
- * 使用 refresh_token 换取新的 session
- * Supabase access_token 默认 1 小时过期，前端可调用此接口刷新
- */
+/** 刷新 session */
 async function refreshSession(refreshToken) {
-  const { data, error } = await supabaseAuth.auth.refreshSession({ refresh_token: refreshToken });
-  if (error) throw error;
-  return data; // { session, user }
+  const { user, session } = await refreshTokenPair(refreshToken)
+  return toSessionResponse(user, session)
 }
 
-/**
- * 更新用户元数据（如昵称）
- * 使用 admin 客户端，可以更新任意用户
- */
-async function updateUserMetadata(userId, metadata) {
-  const { data, error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
-    user_metadata: metadata,
-  });
-  if (error) throw error;
-  return data.user;
-}
-
-/**
- * 邮箱验证码通过后设置密码和用户名
- * 注册前已经通过 verifyOtp 证明邮箱归属，这里只负责补齐密码与用户元数据。
- */
+/** 邮箱验证通过后设置密码和用户名 */
 async function setPasswordAfterEmailVerified(userId, password, username) {
-  const { data, error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
-    password,
-    user_metadata: { username, nickname: username },
-  });
-  if (error) throw error;
-  return data.user;
+  const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS)
+  const { rows } = await db.query(
+    'UPDATE public.users SET password_hash = $1, updated_at = now() WHERE id = $2 RETURNING *',
+    [passwordHash, userId],
+  )
+  if (!rows.length) throw new Error('用户不存在')
+
+  await pgAdmin
+    .from('user_profile')
+    .update({ nickname: username, update_time: new Date().toISOString() })
+    .eq('user_id', userId)
+
+  const user = toAuthUser(rows[0], username)
+  user.user_metadata.username = username
+  user.user_metadata.nickname = username
+  return user
 }
 
-/**
- * 发送密码重置验证码（OTP）
- * 复用 Supabase Magic Link 的 OTP 能力，但邮件模板只显示 6 位数字验证码
- * 用户拿到验证码后在前端输入，完成身份校验再重置密码
- *
- * @param {string} email 用户邮箱
- */
+/** 发送密码重置验证码 */
 async function sendPasswordResetCode(email) {
-  const { data, error } = await supabaseAuth.auth.signInWithOtp({
-    email,
-    options: {
-      shouldCreateUser: false, // 不自动注册，未注册邮箱不发送验证码
-    },
-  });
-  if (error) throw error;
-  return data;
+  return sendOtpInternal(email, 'reset', false)
 }
 
-/**
- * 校验重置验证码并更新密码
- * 使用 verifyOtp 验证邮箱归属后，再用 admin 权限更新该用户密码
- *
- * @param {string} email 用户邮箱
- * @param {string} code 6 位验证码
- * @param {string} newPassword 新密码
- */
+/** 校验重置验证码并更新密码 */
 async function verifyResetCodeAndUpdatePassword(email, code, newPassword) {
-  // 先校验邮箱验证码，确认邮箱归属
-  const { data, error } = await supabaseAuth.auth.verifyOtp({
-    email,
-    token: code,
-    type: 'email',
-  });
-  if (error) {
-    const err = new Error('验证码错误或已过期');
-    err.statusCode = 400;
-    throw err;
+  await verifyOtpCode(email, code, 'reset')
+  const normalizedEmail = String(email || '').trim().toLowerCase()
+  const { rows } = await db.query('SELECT id FROM public.users WHERE email = $1 LIMIT 1', [normalizedEmail])
+  if (!rows.length) {
+    const err = new Error('用户不存在')
+    err.statusCode = 404
+    throw err
   }
 
-  // 校验通过后，使用 admin 权限更新密码
-  const { data: updateData, error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
-    data.user.id,
-    { password: newPassword }
-  );
-  if (updateError) throw updateError;
-  return updateData.user;
+  const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS)
+  await db.query(
+    'UPDATE public.users SET password_hash = $1, updated_at = now() WHERE id = $2',
+    [passwordHash, rows[0].id],
+  )
+
+  return toAuthUser({ id: rows[0].id, email: normalizedEmail })
 }
 
-/**
- * 邮箱 + 密码登录
- * @returns {Promise<{user, session}>}
- */
+/** 邮箱 + 密码登录 */
 async function signInWithPassword(email, password) {
-  const { data, error } = await supabaseAuth.auth.signInWithPassword({
-    email,
-    password,
-  });
-  if (error) throw error;
-  return data;
+  const normalizedEmail = String(email || '').trim().toLowerCase()
+  const { rows } = await db.query('SELECT * FROM public.users WHERE email = $1 LIMIT 1', [normalizedEmail])
+  if (!rows.length || !rows[0].password_hash) {
+    throw new Error('Invalid login credentials')
+  }
+
+  const valid = await bcrypt.compare(password, rows[0].password_hash)
+  if (!valid) {
+    throw new Error('Invalid login credentials')
+  }
+
+  const session = await issueTokenPair(rows[0])
+  return toSessionResponse(rows[0], session)
 }
 
-/** 
- * 根据邮箱或用户名解析登录邮箱
- * 用户名保存在业务 profile 的 nickname 字段，最终仍使用 Supabase 邮箱密码登录。
- */
+/** 根据邮箱或用户名解析登录邮箱 */
 async function resolveLoginEmail(identifier) {
-  const account = String(identifier || '').trim();
+  const account = String(identifier || '').trim()
   if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(account)) {
-    return account;
+    return account.toLowerCase()
   }
-  const { data, error } = await supabaseAdmin
+
+  const { data, error } = await pgAdmin
     .from('user_profile')
     .select('email')
     .eq('nickname', account)
-    .single();
-  if (error || !data || !data.email) {
-    const err = new Error('账号不存在');
-    err.statusCode = 404;
-    throw err;
+    .single()
+
+  if (error || !data?.email) {
+    const err = new Error('账号不存在')
+    err.statusCode = 404
+    throw err
   }
-  return data.email;
+  return data.email
 }
 
-/**
- * 检查用户名是否已被业务资料占用
- * 用户名映射到 user_profile.nickname，用于用户名密码登录。
- */
+/** 检查用户名是否已被占用 */
 async function isUsernameTaken(username) {
-  const { count, error } = await supabaseAdmin
+  const { count, error } = await pgAdmin
     .from('user_profile')
     .select('user_id', { count: 'exact', head: true })
-    .eq('nickname', username);
-  if (error) throw error;
-  return (count || 0) > 0;
+    .eq('nickname', username)
+  if (error) throw error
+  return (count || 0) > 0
 }
 
 module.exports = {
@@ -196,11 +250,10 @@ module.exports = {
   verifyOtp,
   getUserByToken,
   refreshSession,
-  updateUserMetadata,
   setPasswordAfterEmailVerified,
   sendPasswordResetCode,
   verifyResetCodeAndUpdatePassword,
   signInWithPassword,
   resolveLoginEmail,
   isUsernameTaken,
-};
+}

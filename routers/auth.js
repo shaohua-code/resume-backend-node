@@ -308,7 +308,7 @@ router.post(
   '/updatePassword',
   [
     body('email').isEmail().withMessage('邮箱格式不正确'),
-    body('code').isString().isLength({ min: 8, max: 8 }).withMessage('验证码为 8 位数字'),
+    body('code').isString().isLength({ min: 6, max: 6 }).withMessage('验证码为 6 位数字'),
     body('password')
       .isString()
       .isLength({ min: 6, max: 72 })

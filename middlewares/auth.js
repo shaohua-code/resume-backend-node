@@ -1,7 +1,6 @@
 /**
  * 认证中间件
- * 从请求头中提取 access_token，调用 Supabase 验证后将用户信息挂在 req.user 上
- * 请求头格式：Authorization: Bearer <access_token>
+ * 从请求头提取 JWT，验证后将用户信息挂在 req.user 上
  */
 
 const { getUserByToken } = require('../services/auth/auth.service');

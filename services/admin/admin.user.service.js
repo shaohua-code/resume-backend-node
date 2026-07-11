@@ -136,9 +136,7 @@ async function updateUser(req) {
 }
 
 /**
- * 重置用户密码，生成 Supabase recovery 链接返回给管理员
- * @param {Object} req - Express 请求对象
- * @returns {Promise<Object>} 重置链接信息
+ * 重置用户密码：生成临时密码返回给管理员
  */
 async function resetPassword(req) {
   const { data: target } = await userRepo.findById(req.params.userId);
@@ -147,7 +145,6 @@ async function resetPassword(req) {
     throw Object.assign(new Error('用户不存在'), { statusCode: 404 });
   }
 
-  // 普通管理员只能重置归属用户密码
   if (req.user.role !== ROLES.SUPER_ADMIN) {
     const hasAccess = await canAccessUser(req.user, target.user_id);
     if (!hasAccess) {
@@ -155,17 +152,20 @@ async function resetPassword(req) {
     }
   }
 
-  const { data, error } = await supabaseAdmin.auth.admin.generateLink({
-    type: 'recovery',
-    email: target.email,
-  });
+  const bcrypt = require('bcryptjs');
+  const crypto = require('crypto');
+  const db = require('../../lib/db');
 
-  if (error) {
-    throw Object.assign(new Error(`生成重置链接失败：${error.message}`), { statusCode: 500 });
-  }
+  const tempPassword = crypto.randomBytes(4).toString('hex');
+  const passwordHash = await bcrypt.hash(tempPassword, 10);
+
+  await db.query(
+    'UPDATE public.users SET password_hash = $1, updated_at = now() WHERE id = $2',
+    [passwordHash, target.user_id],
+  );
 
   await logAdminAction(req, 'reset_password', 'user_profile', req.params.userId);
-  return { action_link: data.properties && data.properties.action_link };
+  return { temp_password: tempPassword, message: '已生成临时密码，请告知用户登录后尽快修改' };
 }
 
 /**
