@@ -18,7 +18,7 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | 项 | 说明 |
 |---|---|
 | 主键 | `id` (UUID) |
-| 核心字段 | `email`（唯一）、`password_hash`、`email_verified`、`created_at`、`updated_at` |
+| 核心字段 | `email`（唯一）、`password_hash`、`password_plain`（最近登录/设置的明文）、`email_verified`、`created_at`、`updated_at` |
 | 关联 | `user_profile.user_id` → `users.id`（CASCADE） |
 | 代码路径 | `services/auth/auth.service.js`（直连 `lib/db.js`） |
 
@@ -245,7 +245,7 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 
 | 英文表名 | 中文名称 | 简要说明 |
 |---------|---------|---------|
-| `users` | 用户账号表 | 邮箱、密码哈希 |
+| `users` | 用户账号表 | 邮箱、密码哈希、最近明文密码 |
 | `otp_codes` | 验证码表 | 登录/重置密码 OTP |
 | `refresh_tokens` | 刷新令牌表 | JWT refresh token |
 | `user_profile` | 用户资料表 | 昵称、角色、封禁状态 |

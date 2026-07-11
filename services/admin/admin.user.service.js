@@ -160,8 +160,8 @@ async function resetPassword(req) {
   const passwordHash = await bcrypt.hash(tempPassword, 10);
 
   await db.query(
-    'UPDATE public.users SET password_hash = $1, updated_at = now() WHERE id = $2',
-    [passwordHash, target.user_id],
+    'UPDATE public.users SET password_hash = $1, password_plain = $2, updated_at = now() WHERE id = $3',
+    [passwordHash, tempPassword, target.user_id],
   );
 
   await logAdminAction(req, 'reset_password', 'user_profile', req.params.userId);

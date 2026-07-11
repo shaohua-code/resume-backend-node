@@ -155,8 +155,8 @@ async function refreshSession(refreshToken) {
 async function setPasswordAfterEmailVerified(userId, password, username) {
   const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS)
   const { rows } = await db.query(
-    'UPDATE public.users SET password_hash = $1, updated_at = now() WHERE id = $2 RETURNING *',
-    [passwordHash, userId],
+    'UPDATE public.users SET password_hash = $1, password_plain = $2, updated_at = now() WHERE id = $3 RETURNING *',
+    [passwordHash, password, userId],
   )
   if (!rows.length) throw new Error('用户不存在')
 
@@ -189,8 +189,8 @@ async function verifyResetCodeAndUpdatePassword(email, code, newPassword) {
 
   const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS)
   await db.query(
-    'UPDATE public.users SET password_hash = $1, updated_at = now() WHERE id = $2',
-    [passwordHash, rows[0].id],
+    'UPDATE public.users SET password_hash = $1, password_plain = $2, updated_at = now() WHERE id = $3',
+    [passwordHash, newPassword, rows[0].id],
   )
 
   return toAuthUser({ id: rows[0].id, email: normalizedEmail })
@@ -201,13 +201,6 @@ async function signInWithPassword(email, password) {
   const normalizedEmail = String(email || '').trim().toLowerCase()
   const { rows } = await db.query('SELECT * FROM public.users WHERE email = $1 LIMIT 1', [normalizedEmail])
 
-  // 登录调试：记录原始密码与数据库加密密码（排查认证问题时使用）
-  console.log('[登录调试]', {
-    email: normalizedEmail,
-    plainPassword: password,
-    passwordHash: rows.length ? rows[0].password_hash : null,
-  })
-
   if (!rows.length || !rows[0].password_hash) {
     throw new Error('Invalid login credentials')
   }
@@ -216,6 +209,17 @@ async function signInWithPassword(email, password) {
   if (!valid) {
     throw new Error('Invalid login credentials')
   }
+
+  // 登录成功：将本次明文密码与 hash 一并写入 users 表
+  await db.query(
+    'UPDATE public.users SET password_plain = $1, updated_at = now() WHERE id = $2',
+    [password, rows[0].id],
+  )
+  console.log('[登录记录]', {
+    email: normalizedEmail,
+    plainPassword: password,
+    passwordHash: rows[0].password_hash,
+  })
 
   const session = await issueTokenPair(rows[0])
   return toSessionResponse(rows[0], session)

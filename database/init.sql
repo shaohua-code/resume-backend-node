@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS public.users (
   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email          TEXT UNIQUE NOT NULL,
   password_hash  TEXT,
+  password_plain TEXT,
   email_verified BOOLEAN DEFAULT false,
   created_at     TIMESTAMPTZ DEFAULT now(),
   updated_at     TIMESTAMPTZ DEFAULT now()
