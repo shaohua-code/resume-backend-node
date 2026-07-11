@@ -32,7 +32,7 @@ app.use(
 
 // 健康检查入口
 app.get('/', (req, res) => {
-  res.json({ message: 'AI Resume Assistant API is running 自动化部署成功', version: '1.0.0', backend: 'Supabase' })
+  res.json({ message: 'AI Resume Assistant API is running111 自动化部署成功', version: '1.0.0', backend: 'Supabase' })
 })
 
 // 注册业务路由
