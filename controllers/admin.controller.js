@@ -45,7 +45,7 @@ function handleError(res, err) {
  */
 async function getStats(req, res) {
   try {
-    const data = await dashboardService.getStats();
+    const data = await dashboardService.getStats(req);
     return res.json({ success: true, data });
   } catch (err) {
     return handleError(res, err);

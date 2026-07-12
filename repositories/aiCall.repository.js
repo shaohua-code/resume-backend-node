@@ -52,28 +52,47 @@ async function listAiCalls({ from, to, userId, taskType, userIds }) {
 }
 
 /**
+ * 按归属用户列表过滤查询（null 不过滤；空数组强制无结果）
+ * @param {Object} query - supabase/pg 查询对象
+ * @param {string[]|null|undefined} userIds - 归属用户 ID 列表
+ */
+function applyUserIdsFilter(query, userIds) {
+  if (userIds === undefined || userIds === null) return query
+  if (!userIds.length) {
+    return query.eq('user_id', '00000000-0000-0000-0000-000000000000')
+  }
+  return query.in('user_id', userIds)
+}
+
+/**
  * 查询指定时间之后的所有 AI 调用记录，用于趋势统计
  * @param {string} yearStart - 起始时间 ISO 字符串
+ * @param {string[]|null} [userIds] - 归属用户过滤；null 表示不过滤
  * @returns {Promise<Object>} PostgreSQL 查询结果 { data, error }
  */
-async function findAllAiCalls(yearStart) {
-  return dbAdmin
+async function findAllAiCalls(yearStart, userIds = null) {
+  let query = dbAdmin
     .from('ai_call_record')
     .select('create_time')
-    .gte('create_time', yearStart);
+    .gte('create_time', yearStart)
+  query = applyUserIdsFilter(query, userIds)
+  return query
 }
 
 /**
  * 查询最近的 AI 调用任务类型分布
  * @param {number} limit - 查询条数
+ * @param {string[]|null} [userIds] - 归属用户过滤；null 表示不过滤
  * @returns {Promise<Object>} PostgreSQL 查询结果 { data, error }
  */
-async function findRecentTaskTypes(limit = 500) {
-  return dbAdmin
+async function findRecentTaskTypes(limit = 500, userIds = null) {
+  let query = dbAdmin
     .from('ai_call_record')
     .select('task_type')
     .order('create_time', { ascending: false })
-    .limit(limit);
+    .limit(limit)
+  query = applyUserIdsFilter(query, userIds)
+  return query
 }
 
 module.exports = {

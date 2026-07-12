@@ -271,8 +271,10 @@ async function changeBalance({ userId, delta, type, remark, operatorId = null, a
     throw err
   }
 
+  // 仅 AI_CONSUME 扣费计入累计消费；额度发放/回收等不计入
   const totalConsumed = roundMoney(
-    Number(wallet.total_consumed || 0) + (delta < 0 ? Math.abs(delta) : 0),
+    Number(wallet.total_consumed || 0)
+      + (type === LEDGER_TYPES.AI_CONSUME && delta < 0 ? Math.abs(delta) : 0),
   )
   const now = new Date().toISOString()
 

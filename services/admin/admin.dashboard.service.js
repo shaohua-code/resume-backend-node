@@ -1,6 +1,7 @@
 /**
  * 管理后台数据大盘服务
  * 聚合统计指标、趋势图、余额消费概览、公告与系统状态
+ * 普通管理员仅统计归属用户；超级管理员看全站
  */
 
 const { dbAdmin } = require('../../dbClient')
@@ -8,6 +9,23 @@ const { ROLES } = require('../../utils/permissions')
 const userRepo = require('../../repositories/user.repository')
 const aiCallRepo = require('../../repositories/aiCall.repository')
 const walletService = require('../wallet/wallet.service')
+const { getOwnedUserIds } = require('./admin.common.service')
+
+/** 空归属列表时用于强制无结果的占位 UUID */
+const EMPTY_SCOPE_USER_ID = '00000000-0000-0000-0000-000000000000'
+
+/**
+ * 按归属用户过滤查询：null 不过滤；空数组强制无结果；否则 .in(user_id)
+ * @param {Object} query
+ * @param {string[]|null} ownedUserIds
+ */
+function applyUserScope(query, ownedUserIds) {
+  if (ownedUserIds === null || ownedUserIds === undefined) return query
+  if (!ownedUserIds.length) {
+    return query.eq('user_id', EMPTY_SCOPE_USER_ID)
+  }
+  return query.in('user_id', ownedUserIds)
+}
 
 /**
  * 获取指定表的数量，支持自定义过滤条件
@@ -78,22 +96,60 @@ function bucketAmountByMonth(rows, months) {
 }
 
 /**
- * 获取管理后台顶部统计卡片数据
+ * 读取当前登录管理员自己的钱包余额、累计 AI 消费、累计额度发放
+ * @param {Object} req Express 请求对象
  */
-async function getStats() {
-  const [userCount, adminCount, resumeCount, aiCallCount, walletStats] = await Promise.all([
-    getTableCount('user_profile'),
+async function getMyWalletStats(req) {
+  if (!req?.user) {
+    return { my_balance: 0, my_consumed: 0, my_granted: 0 }
+  }
+
+  try {
+    const [balanceInfo, grantStats] = await Promise.all([
+      walletService.getBalance(req.user.id, req.user.role),
+      // 累计发放：自己钱包上全部 ADMIN_GRANT 扣款（绝对值之和）
+      dbAdmin
+        .from('balance_ledger')
+        .select('amount')
+        .eq('type', 'ADMIN_GRANT')
+        .eq('user_id', req.user.id)
+        .lt('amount', 0),
+    ])
+
+    const grantRows = grantStats.data || []
+    const myGranted = grantRows.reduce(
+      (sum, row) => sum + Math.abs(Number(row.amount || 0)),
+      0,
+    )
+
+    return {
+      my_balance: balanceInfo.balance,
+      my_consumed: balanceInfo.total_consumed,
+      my_granted: Number(myGranted.toFixed(2)),
+    }
+  } catch (e) {
+    console.error('[dashboard] 获取个人钱包统计失败:', e.message)
+    return { my_balance: 0, my_consumed: 0, my_granted: 0 }
+  }
+}
+
+/**
+ * 获取管理后台顶部统计卡片数据
+ * @param {Object} req Express 请求对象
+ */
+async function getStats(req) {
+  // 普通管理员仅看归属用户；超管 ownedUserIds 为 null
+  const ownedUserIds = await getOwnedUserIds(req.user)
+
+  const [userCount, adminCount, resumeCount, aiCallCount, myWalletStats] = await Promise.all([
+    getTableCount('user_profile', (query) => applyUserScope(query, ownedUserIds)),
     userRepo.countUsers((query) => query.in('role', [ROLES.ADMIN, ROLES.SUPER_ADMIN])),
-    getTableCount('resume'),
-    aiCallRepo.countAiCalls(),
-    dbAdmin.from('user_wallet').select('balance,total_consumed'),
+    getTableCount('resume', (query) => applyUserScope(query, ownedUserIds)),
+    aiCallRepo.countAiCalls((query) => applyUserScope(query, ownedUserIds)),
+    getMyWalletStats(req),
   ])
 
-  const wallets = walletStats.data || []
-  const totalBalance = wallets.reduce((sum, row) => sum + Number(row.balance || 0), 0)
-  const totalConsumed = wallets.reduce((sum, row) => sum + Number(row.total_consumed || 0), 0)
-
-  const { data: aiTasks } = await aiCallRepo.findRecentTaskTypes(500)
+  const { data: aiTasks } = await aiCallRepo.findRecentTaskTypes(500, ownedUserIds)
   const aiTaskMap = (aiTasks || []).reduce((acc, item) => {
     acc[item.task_type] = (acc[item.task_type] || 0) + 1
     return acc
@@ -104,8 +160,9 @@ async function getStats() {
     admin_count: adminCount,
     resume_count: resumeCount,
     ai_call_count: aiCallCount,
-    total_balance: Number(totalBalance.toFixed(2)),
-    total_consumed: Number(totalConsumed.toFixed(2)),
+    my_balance: myWalletStats.my_balance,
+    my_consumed: myWalletStats.my_consumed,
+    my_granted: myWalletStats.my_granted,
     ai_task_stats: Object.entries(aiTaskMap).map(([task_type, count]) => ({ task_type, count })),
   }
 }
@@ -162,33 +219,48 @@ async function getDashboard(req) {
   const todayStart = startOfDay(0).toISOString()
   const yesterdayStart = startOfDay(-1).toISOString()
 
-  const [userCount, adminCount, resumeCount, todayNewUsers, yesterdayNewUsers, walletStats, ledgerStats] = await Promise.all([
-    getTableCount('user_profile'),
+  // 普通管理员仅统计归属用户；超管不过滤
+  const ownedUserIds = await getOwnedUserIds(req.user)
+
+  const [userCount, adminCount, resumeCount, todayNewUsers, yesterdayNewUsers, myWalletStats, consumeLedgerStats, grantLedgerStats] = await Promise.all([
+    getTableCount('user_profile', (query) => applyUserScope(query, ownedUserIds)),
     userRepo.countUsers((query) => query.in('role', [ROLES.ADMIN, ROLES.SUPER_ADMIN])),
-    getTableCount('resume'),
-    userRepo.countUsers((query) => query.gte('create_time', todayStart)),
-    userRepo.countUsers((query) => query.gte('create_time', yesterdayStart).lt('create_time', todayStart)),
-    dbAdmin.from('user_wallet').select('balance,total_consumed'),
+    getTableCount('resume', (query) => applyUserScope(query, ownedUserIds)),
+    userRepo.countUsers((query) => applyUserScope(query.gte('create_time', todayStart), ownedUserIds)),
+    userRepo.countUsers((query) => applyUserScope(
+      query.gte('create_time', yesterdayStart).lt('create_time', todayStart),
+      ownedUserIds,
+    )),
+    getMyWalletStats(req),
+    // AI 消费趋势：仅当前管理员自己的 AI_CONSUME（与「累计消费」卡片口径一致）
     dbAdmin
       .from('balance_ledger')
-      .select('amount,type,create_time')
-      .gte('create_time', rangeStart),  // 使用动态时间范围
+      .select('amount,type,create_time,user_id')
+      .eq('type', 'AI_CONSUME')
+      .eq('user_id', req.user.id)
+      .gte('create_time', rangeStart),
+    // 额度发放：仅当前管理员自己钱包上的 ADMIN_GRANT 扣款
+    dbAdmin
+      .from('balance_ledger')
+      .select('amount,type,create_time,user_id')
+      .eq('type', 'ADMIN_GRANT')
+      .eq('user_id', req.user.id)
+      .lt('amount', 0)
+      .gte('create_time', rangeStart),
   ])
 
-  const wallets = walletStats.data || []
-  const totalBalance = wallets.reduce((sum, row) => sum + Number(row.balance || 0), 0)
-  const totalConsumed = wallets.reduce((sum, row) => sum + Number(row.total_consumed || 0), 0)
+  const aiConsumeRows = consumeLedgerStats.data || []
+  const grantRows = grantLedgerStats.data || []
 
-  const ledgerRows = ledgerStats.data || []
-  const aiConsumeRows = ledgerRows.filter((row) => row.type === 'AI_CONSUME')
-  const grantRows = ledgerRows.filter((row) => row.type === 'ADMIN_GRANT' || row.type === 'REGISTER_GIFT')
+  let userTrendQuery = dbAdmin
+    .from('user_profile')
+    .select('create_time,role,user_id')
+    .gte('create_time', rangeStart)
+  userTrendQuery = applyUserScope(userTrendQuery, ownedUserIds)
 
   const [{ data: userRows }, { data: aiRows }] = await Promise.all([
-    dbAdmin
-      .from('user_profile')
-      .select('create_time,role')
-      .gte('create_time', rangeStart),  // 使用动态时间范围
-    aiCallRepo.findAllAiCalls(rangeStart),  // 使用动态时间范围
+    userTrendQuery,
+    aiCallRepo.findAllAiCalls(rangeStart, ownedUserIds),
   ])
 
   const userTrend = bucketByMonth(userRows, months)
@@ -210,16 +282,8 @@ async function getDashboard(req) {
     storage: 'ok',
   }
 
-  // 查询当前管理员的可用额度
-  let myBalance = 0
-  if (req && req.user) {
-    try {
-      const balanceInfo = await walletService.getBalance(req.user.id, req.user.role)
-      myBalance = balanceInfo.balance
-    } catch (e) {
-      console.error('[getDashboard] 获取可用额度失败:', e.message)
-    }
-  }
+  // 当前管理员个人钱包数据（余额、AI 消费、额度发放总额）
+  const { my_balance: myBalance, my_consumed: myConsumed, my_granted: myGranted } = myWalletStats
 
   return {
     user_count: userCount,
@@ -228,9 +292,9 @@ async function getDashboard(req) {
     ai_call_count: aiTrend.reduce((sum, value) => sum + value, 0),
     today_new_users: todayNewUsers,
     user_growth: todayNewUsers - yesterdayNewUsers,
-    total_balance: Number(totalBalance.toFixed(2)),
-    total_consumed: Number(totalConsumed.toFixed(2)),
     my_balance: myBalance,
+    my_consumed: myConsumed,
+    my_granted: myGranted,
     months,
     user_trend: userTrend,
     consume_trend: consumeTrend,
