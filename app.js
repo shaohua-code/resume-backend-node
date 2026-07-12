@@ -35,7 +35,7 @@ app.use(
 
 // 健康检查入口
 app.get('/', (req, res) => {
-  res.json({ message: 'AI Resume Assistant API is running', version: '1.0.0', backend: 'PostgreSQL' })
+  res.json({ message: 'AI Res111ume Assistant API is running', version: '1.0.0', backend: 'PostgreSQL' })
 })
 
 // 注册业务路由
