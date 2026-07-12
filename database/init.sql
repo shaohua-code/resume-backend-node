@@ -9,15 +9,16 @@
 -- 1. 宝塔 → 软件商店 → 安装 PostgreSQL
 -- 2. 数据库 → PostgreSQL → 添加数据库 ai-resume / 用户 ai-resume
 -- 3. 点管理 → SQL 执行 → 粘贴本文件全文 → 执行
--- 4. 验证：SELECT count(*) FROM information_schema.tables WHERE table_schema='public'; -- 预期 20
+-- 4. 验证：SELECT count(*) FROM information_schema.tables WHERE table_schema='public'; -- 预期 19
 --
 -- 【后端 .env】
 -- DATABASE_URL=postgresql://ai-resume:密码@175.178.62.55:5432/ai-resume
 --
 -- 【创建超级管理员】注册账号后执行：
 -- UPDATE public.user_profile SET role='SUPER_ADMIN' WHERE email='你的邮箱';
--- INSERT INTO public.admin_quota_pool (admin_id,total_quota,allocated_quota)
--- SELECT user_id,1000000,0 FROM public.user_profile WHERE email='你的邮箱' ON CONFLICT DO NOTHING;
+-- INSERT INTO public.user_wallet (user_id, balance, total_consumed, update_time)
+-- SELECT user_id, 1000000, 0, now() FROM public.user_profile WHERE email='你的邮箱'
+-- ON CONFLICT (user_id) DO UPDATE SET balance = 1000000, update_time = now();
 -- ============================================================
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
@@ -211,7 +212,7 @@ CREATE TABLE IF NOT EXISTS public.balance_ledger (
 CREATE INDEX IF NOT EXISTS idx_balance_ledger_user_time ON public.balance_ledger(user_id, create_time DESC);
 CREATE INDEX IF NOT EXISTS idx_balance_ledger_type ON public.balance_ledger(type);
 
-COMMENT ON COLUMN public.balance_ledger.paid_amount IS '实付金额（ADMIN_GRANT/ADMIN_ALLOCATE/ADMIN_POOL_GRANT 类型有值）';
+COMMENT ON COLUMN public.balance_ledger.paid_amount IS '实付金额（ADMIN_GRANT 类型有值）';
 
 -- ========== 9. 管理员归属 ==========
 
@@ -237,13 +238,6 @@ CREATE TABLE IF NOT EXISTS public.invite_link (
 );
 CREATE INDEX IF NOT EXISTS idx_invite_link_admin ON public.invite_link(admin_id);
 CREATE INDEX IF NOT EXISTS idx_invite_link_code ON public.invite_link(code);
-
-CREATE TABLE IF NOT EXISTS public.admin_quota_pool (
-  admin_id        UUID PRIMARY KEY REFERENCES public.users(id) ON DELETE CASCADE,
-  total_quota     NUMERIC(16, 4) NOT NULL DEFAULT 0,
-  allocated_quota NUMERIC(16, 4) NOT NULL DEFAULT 0,
-  update_time     TIMESTAMPTZ DEFAULT now()
-);
 
 -- ========== 10. 访客 ==========
 

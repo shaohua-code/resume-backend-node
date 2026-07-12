@@ -560,11 +560,11 @@ UPDATE public.user_profile
 SET role = 'SUPER_ADMIN', status = 'ACTIVE', update_time = now()
 WHERE email = 'shaohua_code@163.com';
 
-INSERT INTO public.admin_quota_pool (admin_id, total_quota, allocated_quota, update_time)
+INSERT INTO public.user_wallet (user_id, balance, total_consumed, update_time)
 SELECT user_id, 1000000, 0, now()
 FROM public.user_profile
 WHERE email = 'shaohua_code@163.com'
-ON CONFLICT (admin_id) DO NOTHING;
+ON CONFLICT (user_id) DO UPDATE SET balance = 1000000, update_time = now();
 ```
 
 ```sql

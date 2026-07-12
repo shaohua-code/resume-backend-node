@@ -210,13 +210,14 @@ async function getDashboard(req) {
     storage: 'ok',
   }
 
-  // 查询当前管理员的额度池信息（超管显示总额度池，管理员显示自己的额度池）
-  let quotaPool = { total_quota: 0, allocated_quota: 0, available: 0 }
+  // 查询当前管理员的可用额度
+  let myBalance = 0
   if (req && req.user) {
     try {
-      quotaPool = await walletService.getQuotaPool(req.user.id, req.user.role)
+      const balanceInfo = await walletService.getBalance(req.user.id, req.user.role)
+      myBalance = balanceInfo.balance
     } catch (e) {
-      console.error('[getDashboard] 获取额度池失败:', e.message)
+      console.error('[getDashboard] 获取可用额度失败:', e.message)
     }
   }
 
@@ -229,10 +230,7 @@ async function getDashboard(req) {
     user_growth: todayNewUsers - yesterdayNewUsers,
     total_balance: Number(totalBalance.toFixed(2)),
     total_consumed: Number(totalConsumed.toFixed(2)),
-    // 额度池数据：超管显示总额度池剩余可分配，管理员显示自己的额度池
-    quota_total: quotaPool.total_quota,
-    quota_allocated: quotaPool.allocated_quota,
-    quota_available: quotaPool.available,
+    my_balance: myBalance,
     months,
     user_trend: userTrend,
     consume_trend: consumeTrend,

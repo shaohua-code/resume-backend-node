@@ -1,12 +1,12 @@
 # 数据库表中文对照
 
-项目共 **20 张表**，建表脚本见 [`init.sql`](init.sql)。
+项目共 **19 张表**，建表脚本见 [`init.sql`](init.sql)。
 
 验证表数量：
 
 ```sql
 SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
--- 预期：20
+-- 预期：19
 ```
 
 ---
@@ -181,7 +181,7 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 |---|---|
 | 主键 | `id` (BIGSERIAL) |
 | 核心字段 | `user_id`、`type`、`amount`、`balance_after`、`remark`、`operator_id`、`ai_call_id`、`paid_amount` |
-| 流水类型 | `REGISTER_GIFT`、`AI_CONSUME`、`ADMIN_GRANT`、`ADMIN_ALLOCATE` 等 |
+| 流水类型 | `REGISTER_GIFT`、`AI_CONSUME`、`ADMIN_GRANT`、`ADMIN_DEDUCT`、`REFUND` |
 | 关联 | `user_id` → `users.id`；`ai_call_id` → `ai_call_record.id` |
 | 代码路径 | `repositories/wallet.repository.js`、`services/wallet/wallet.service.js` |
 
@@ -206,15 +206,6 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | 核心字段 | `admin_id`、`code`（唯一）、`status`、`expire_time`、`used_count` |
 | 关联 | `admin_id` → `users.id`（CASCADE） |
 | 代码路径 | `services/admin/admin.invite.service.js` |
-
-### admin_quota_pool — 管理员额度池表
-
-| 项 | 说明 |
-|---|---|
-| 主键 | `admin_id` (UUID) |
-| 核心字段 | `total_quota`、`allocated_quota` |
-| 关联 | `admin_id` → `users.id`（CASCADE） |
-| 代码路径 | `services/wallet/wallet.service.js`、`services/admin/admin.dashboard.service.js` |
 
 ---
 
@@ -263,5 +254,4 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | `balance_ledger` | 余额流水表 | 充值/消费/分配记录 |
 | `admin_user_relation` | 管理员用户归属表 | 用户归属哪个管理员 |
 | `invite_link` | 邀请链接表 | 注册邀请码 |
-| `admin_quota_pool` | 管理员额度池表 | 管理员可分配额度 |
 | `visit_log` | 访问日志表 | 网站访问统计 |

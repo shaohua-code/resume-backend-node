@@ -31,8 +31,8 @@ router.post('/users/claim', requirePermission(PERMISSIONS.ADMIN_CLAIM_USERS), ad
 // 用户额度管理
 router.get('/wallets', requirePermission(PERMISSIONS.ADMIN_WALLET), adminController.listWallets)
 
-// 额度池摘要
-router.get('/quota-pool/summary', requirePermission(PERMISSIONS.ADMIN_WALLET), adminController.getQuotaPoolSummary)
+// 当前管理员额度摘要
+router.get('/wallet/summary', requirePermission(PERMISSIONS.ADMIN_WALLET), adminController.getWalletSummary)
 
 // 消费记录
 router.get('/ledgers', requirePermission(PERMISSIONS.ADMIN_VIEW_LEDGERS), adminController.listLedgers)

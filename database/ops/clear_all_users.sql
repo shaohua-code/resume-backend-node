@@ -14,7 +14,6 @@ TRUNCATE TABLE
   public.admin_action_log,
   public.admin_user_relation,
   public.invite_link,
-  public.admin_quota_pool,
   public.user_wallet,
   public.refresh_tokens,
   public.otp_codes,

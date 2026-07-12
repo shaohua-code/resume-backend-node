@@ -399,11 +399,11 @@ async function deleteInviteLink(req, res) {
 }
 
 /**
- * 获取当前管理员额度池摘要
+ * 获取当前管理员额度摘要
  */
-async function getQuotaPoolSummary(req, res) {
+async function getWalletSummary(req, res) {
   try {
-    const data = await walletService.getQuotaPoolSummary(req);
+    const data = await walletService.getWalletSummary(req);
     return res.json({ success: true, data });
   } catch (err) {
     return handleError(res, err);
@@ -450,6 +450,6 @@ module.exports = {
   createInviteLink,
   updateInviteLink,
   deleteInviteLink,
-  getQuotaPoolSummary,
+  getWalletSummary,
   listVisits,
 };
