@@ -5,8 +5,8 @@
 
 const express = require('express')
 const { authRequired } = require('../middlewares/auth')
-const { requireAdmin, requirePermission } = require('../middlewares/permission')
-const { PERMISSIONS } = require('../utils/permissions')
+const { requireAdmin, requirePermission, requireRole } = require('../middlewares/permission')
+const { PERMISSIONS, ROLES } = require('../utils/permissions')
 const adminController = require('../controllers/admin.controller')
 
 const router = express.Router()
@@ -73,5 +73,22 @@ router.get('/feedbacks/:id', requirePermission(PERMISSIONS.ADMIN_VIEW_FEEDBACK),
 
 // 访客记录（仅 SUPER_ADMIN）
 router.get('/visits', requirePermission(PERMISSIONS.ADMIN_VIEW_VISITS), adminController.listVisits)
+
+// 充值二维码管理（按 admin_id 隔离）
+router.get('/recharge-config', requirePermission(PERMISSIONS.ADMIN_RECHARGE_MANAGE), adminController.getRechargeConfig)
+router.put('/recharge-config', requirePermission(PERMISSIONS.ADMIN_RECHARGE_MANAGE), adminController.saveRechargeConfig)
+
+// 充值记录与审核
+router.get('/recharge-requests', requirePermission(PERMISSIONS.ADMIN_VIEW_RECHARGE_REQUESTS), adminController.listRechargeRequests)
+router.get('/recharge-requests/:id', requirePermission(PERMISSIONS.ADMIN_VIEW_RECHARGE_REQUESTS), adminController.getRechargeRequest)
+router.get('/recharge-requests/:id/email-preview', requirePermission(PERMISSIONS.ADMIN_VIEW_RECHARGE_REQUESTS), adminController.previewRechargeEmail)
+router.post('/recharge-requests/:id/approve', requirePermission(PERMISSIONS.ADMIN_APPROVE_RECHARGE), adminController.approveRechargeRequest)
+router.delete(
+  '/recharge-requests/:id',
+  requireRole(ROLES.SUPER_ADMIN),
+  adminController.deleteRechargeRequest,
+)
+router.get('/recharge-email-templates', requirePermission(PERMISSIONS.ADMIN_RECHARGE_EMAIL_TEMPLATE), adminController.getRechargeEmailTemplates)
+router.put('/recharge-email-templates', requirePermission(PERMISSIONS.ADMIN_RECHARGE_EMAIL_TEMPLATE), adminController.updateRechargeEmailTemplates)
 
 module.exports = router

@@ -14,6 +14,8 @@ const walletService = require('../services/wallet/wallet.service');
 const ledgerService = require('../services/admin/admin.ledger.service');
 const inviteService = require('../services/admin/admin.invite.service');
 const visitService = require('../services/admin/admin.visit.service');
+const rechargeService = require('../services/admin/admin.recharge.service');
+const rechargeRequestService = require('../services/admin/admin.rechargeRequest.service');
 
 /**
  * 解析分页参数
@@ -423,6 +425,108 @@ async function listVisits(req, res) {
   }
 }
 
+/**
+ * 获取当前管理员的充值二维码配置
+ */
+async function getRechargeConfig(req, res) {
+  try {
+    const data = await rechargeService.getOwnConfig(req.user.id);
+    return res.json({ success: true, data });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+/**
+ * 保存当前管理员的充值二维码配置
+ */
+async function saveRechargeConfig(req, res) {
+  try {
+    const { payment_qrcode_url, contact_qrcode_url, payment_platform, contact_platform } = req.body || {};
+    const data = await rechargeService.upsertOwnConfig(req.user.id, {
+      payment_qrcode_url,
+      contact_qrcode_url,
+      payment_platform,
+      contact_platform,
+    });
+    return res.json({ success: true, data });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+/** 充值记录列表 */
+async function listRechargeRequests(req, res) {
+  try {
+    const { from, to } = parsePagination(req);
+    const result = await rechargeRequestService.listRequests(req, from, to);
+    return res.json({ success: true, total: result.total, items: result.items });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+/** 充值记录详情 */
+async function getRechargeRequest(req, res) {
+  try {
+    const data = await rechargeRequestService.getRequestDetail(req, req.params.id);
+    return res.json({ success: true, data });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+/** 充值邮件预览 */
+async function previewRechargeEmail(req, res) {
+  try {
+    const type = req.query.type || 'admin_notify';
+    const data = await rechargeRequestService.previewEmail(req, req.params.id, type);
+    return res.json({ success: true, data });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+/** 审核充值入账 */
+async function approveRechargeRequest(req, res) {
+  try {
+    const data = await rechargeRequestService.approveRequest(req, req.params.id, req.body || {});
+    return res.json({ success: true, data, message: '充值已入账' });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+/** 删除待充值记录（仅超管） */
+async function deleteRechargeRequest(req, res) {
+  try {
+    const data = await rechargeRequestService.deleteRequest(req, req.params.id);
+    return res.json({ success: true, data, message: '充值记录已删除' });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+/** 读取充值邮件模板（超管） */
+async function getRechargeEmailTemplates(req, res) {
+  try {
+    const data = await rechargeRequestService.getEmailTemplates();
+    return res.json({ success: true, data });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+/** 保存充值邮件模板（超管） */
+async function updateRechargeEmailTemplates(req, res) {
+  try {
+    const data = await rechargeRequestService.updateEmailTemplates(req.body || {});
+    return res.json({ success: true, data, message: '邮件模板已保存' });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
 module.exports = {
   getStats,
   getDashboard,
@@ -452,4 +556,13 @@ module.exports = {
   deleteInviteLink,
   getWalletSummary,
   listVisits,
+  getRechargeConfig,
+  saveRechargeConfig,
+  listRechargeRequests,
+  getRechargeRequest,
+  previewRechargeEmail,
+  approveRechargeRequest,
+  deleteRechargeRequest,
+  getRechargeEmailTemplates,
+  updateRechargeEmailTemplates,
 };

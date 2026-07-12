@@ -45,6 +45,9 @@ const settings = {
 
   APP_FRONTEND_URL: process.env.APP_FRONTEND_URL || process.env.FRONTEND_URL || 'http://localhost:5173',
 
+  // 邮件内图片等资源的公网绝对 URL 前缀（默认可读 APP_PUBLIC_URL）
+  PUBLIC_APP_URL: process.env.PUBLIC_APP_URL || process.env.APP_PUBLIC_URL || process.env.APP_FRONTEND_URL || process.env.FRONTEND_URL || 'http://localhost:5173',
+
   // 上传文件根目录（生产环境建议 /var/www/resume-uploads，独立于 Git 仓库）
   UPLOAD_DIR: process.env.UPLOAD_DIR || path.join(__dirname, 'data', 'uploads'),
 }

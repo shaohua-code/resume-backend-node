@@ -15,5 +15,9 @@ router.use(authRequired)
 router.get('/balance', walletController.getBalance)
 // 查询当前用户流水
 router.get('/ledger', walletController.listLedger)
+// 获取充值二维码（付款码 + 管理员联系码）
+router.get('/recharge-info', walletController.getRechargeInfo)
+// 用户提交充值凭证
+router.post('/recharge-request', walletController.submitRechargeRequest)
 
 module.exports = router

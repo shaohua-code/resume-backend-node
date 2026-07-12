@@ -19,9 +19,10 @@ function sanitizeKeyword(keyword) {
  * 批量附加用户昵称与邮箱，供列表展示
  * @param {Array<Object>} items - 数据列表
  * @param {string} [userIdKey='user_id'] - 列表项中用户 ID 字段名
- * @returns {Promise<Array<Object>>} 附加 user 字段后的列表
+ * @param {string} [profileKey='user'] - 附加到列表项上的 profile 字段名
+ * @returns {Promise<Array<Object>>} 附加 profile 字段后的列表
  */
-async function attachUserProfiles(items, userIdKey = 'user_id') {
+async function attachUserProfiles(items, userIdKey = 'user_id', profileKey = 'user') {
   if (!items?.length) return items || [];
 
   const userIds = [...new Set(items.map((item) => item[userIdKey]).filter(Boolean))];
@@ -36,7 +37,7 @@ async function attachUserProfiles(items, userIdKey = 'user_id') {
 
   return items.map((item) => ({
     ...item,
-    user: profileMap[item[userIdKey]] || null,
+    [profileKey]: profileMap[item[userIdKey]] || null,
   }));
 }
 

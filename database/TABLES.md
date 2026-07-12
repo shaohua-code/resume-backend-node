@@ -1,12 +1,12 @@
 # 数据库表中文对照
 
-项目共 **19 张表**，建表脚本见 [`init.sql`](init.sql)。
+项目共 **21 张表**，建表脚本见 [`init.sql`](init.sql)。
 
 验证表数量：
 
 ```sql
 SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
--- 预期：19
+-- 预期：21
 ```
 
 ---
@@ -207,6 +207,24 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | 关联 | `admin_id` → `users.id`（CASCADE） |
 | 代码路径 | `services/admin/admin.invite.service.js` |
 
+### admin_recharge_config — 管理员充值二维码配置
+
+| 项 | 说明 |
+|---|---|
+| 主键 | `admin_id` (UUID) |
+| 核心字段 | `payment_qrcode_url`（付款码）、`contact_qrcode_url`（管理员联系二维码） |
+| 隔离 | 每个管理员独立一行，互不影响 |
+| 代码路径 | `services/admin/admin.recharge.service.js` |
+
+### recharge_request — 充值凭证申请表
+
+| 项 | 说明 |
+|---|---|
+| 主键 | `id` (BIGSERIAL) |
+| 核心字段 | `user_id`、`admin_id`、`proof_url`（支付凭证）、`paid_amount`（实付）、`grant_amount`（实际充值）、`status`（PENDING/APPROVED） |
+| 关联 | `user_id` / `admin_id` / `operator_id` → `users.id`；`ledger_id` → `balance_ledger.id` |
+| 代码路径 | `services/admin/admin.rechargeRequest.service.js` |
+
 ---
 
 ## 10. 访客
@@ -254,4 +272,6 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | `balance_ledger` | 余额流水表 | 充值/消费/分配记录 |
 | `admin_user_relation` | 管理员用户归属表 | 用户归属哪个管理员 |
 | `invite_link` | 邀请链接表 | 注册邀请码 |
+| `admin_recharge_config` | 管理员充值二维码配置 | 付款码与联系二维码 |
+| `recharge_request` | 充值凭证申请表 | 用户提交凭证、管理员审核入账 |
 | `visit_log` | 访问日志表 | 网站访问统计 |

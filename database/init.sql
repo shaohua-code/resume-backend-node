@@ -9,7 +9,7 @@
 -- 1. 宝塔 → 软件商店 → 安装 PostgreSQL
 -- 2. 数据库 → PostgreSQL → 添加数据库 ai-resume / 用户 ai-resume
 -- 3. 点管理 → SQL 执行 → 粘贴本文件全文 → 执行
--- 4. 验证：SELECT count(*) FROM information_schema.tables WHERE table_schema='public'; -- 预期 19
+-- 4. 验证：SELECT count(*) FROM information_schema.tables WHERE table_schema='public'; -- 预期 21
 --
 -- 【后端 .env】
 -- DATABASE_URL=postgresql://ai-resume:密码@175.178.62.55:5432/ai-resume
@@ -239,6 +239,34 @@ CREATE TABLE IF NOT EXISTS public.invite_link (
 CREATE INDEX IF NOT EXISTS idx_invite_link_admin ON public.invite_link(admin_id);
 CREATE INDEX IF NOT EXISTS idx_invite_link_code ON public.invite_link(code);
 
+-- 管理员充值二维码配置（按 admin_id 隔离）
+CREATE TABLE IF NOT EXISTS public.admin_recharge_config (
+  admin_id           UUID PRIMARY KEY REFERENCES public.users(id) ON DELETE CASCADE,
+  payment_qrcode_url TEXT DEFAULT '',
+  contact_qrcode_url TEXT DEFAULT '',
+  payment_platform   TEXT DEFAULT '',
+  contact_platform   TEXT DEFAULT '',
+  update_time        TIMESTAMPTZ DEFAULT now()
+);
+
+-- 用户充值凭证申请（管理员审核入账）
+CREATE TABLE IF NOT EXISTS public.recharge_request (
+  id            BIGSERIAL PRIMARY KEY,
+  user_id       UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  admin_id      UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  proof_url     TEXT NOT NULL DEFAULT '',
+  paid_amount   NUMERIC(12, 4) NOT NULL,
+  grant_amount  NUMERIC(12, 4),
+  status        TEXT NOT NULL DEFAULT 'PENDING'
+                CHECK (status IN ('PENDING', 'APPROVED')),
+  operator_id   UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  ledger_id     BIGINT REFERENCES public.balance_ledger(id) ON DELETE SET NULL,
+  create_time   TIMESTAMPTZ DEFAULT now(),
+  update_time   TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_recharge_request_admin ON public.recharge_request(admin_id, create_time DESC);
+CREATE INDEX IF NOT EXISTS idx_recharge_request_user ON public.recharge_request(user_id, create_time DESC);
+
 -- ========== 10. 访客 ==========
 
 CREATE TABLE IF NOT EXISTS public.visit_log (
@@ -272,7 +300,9 @@ INSERT INTO public.system_config (config_key, config_value, description)
 VALUES
   ('ai_daily_limit', '{"USER": 3}'::jsonb, '普通用户每日每类AI调用次数'),
   ('register_gift_amount', '{"amount": 10}'::jsonb, '新用户注册赠送额度（元）'),
-  ('super_admin_total_quota', '{"amount": 1000000}'::jsonb, '超级管理员初始总额度池（元）')
+  ('super_admin_total_quota', '{"amount": 1000000}'::jsonb, '超级管理员初始总额度池（元）'),
+  ('recharge_email_admin_notify', '{"subject":"【AI简历助手】用户提交了充值凭证","html":"","text":""}'::jsonb, '用户提交充值凭证后通知管理员的邮件模板'),
+  ('recharge_email_user_confirm', '{"subject":"【AI简历助手】充值已到账","html":"","text":""}'::jsonb, '管理员确认充值后通知用户的邮件模板')
 ON CONFLICT (config_key) DO NOTHING;
 
 INSERT INTO public.ai_model (name, model_key, task_type, input_price_per_million, output_price_per_million, enabled)

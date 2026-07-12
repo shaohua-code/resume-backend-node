@@ -359,6 +359,7 @@ async function transferBalance(operator, target, amount, remark, paidAmount) {
     balance: result.balance,
     amount: delta,
     paid_amount: paidAmount,
+    ledger: result.ledger,
   }
 }
 
@@ -640,4 +641,5 @@ module.exports = {
   listWalletsForAdmin,
   adjustBalanceFromRequest,
   getWalletSummary,
+  transferBalance,
 }
