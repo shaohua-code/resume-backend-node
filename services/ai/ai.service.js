@@ -283,6 +283,27 @@ function normalizeInternship(internship) {
   };
 }
 
+/**
+ * 从 AI 返回数据中提取目标岗位（兼容多种字段命名）
+ * 优先级：标准英文字段 > camelCase 变体 > 中文直译字段 > 通用岗位字段
+ * @param {Object} source AI 原始返回数据
+ * @returns {string} 目标岗位字符串
+ */
+function extractTargetPosition(source) {
+  return (
+    source.target_position ||
+    source.targetPosition ||
+    source['意向岗位'] ||
+    source['求职岗位'] ||
+    source['面试岗位'] ||
+    source['应聘岗位'] ||
+    source.position ||
+    source.job_title ||
+    source.jobTitle ||
+    ''
+  );
+}
+
 function normalizePdfResume(data) {
   const source = data.resume && typeof data.resume === 'object' ? data.resume : data;
   const educations = normalizeEducations(source);
@@ -291,7 +312,8 @@ function normalizePdfResume(data) {
 
   return {
     name: source.name || '',
-    target_position: source.target_position || source.targetPosition || '',
+    // 使用统一提取函数兼容多种岗位字段命名
+    target_position: extractTargetPosition(source),
     phone: source.phone || '',
     email: source.email || '',
     summary: source.summary || '',
