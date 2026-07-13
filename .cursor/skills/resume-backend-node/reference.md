@@ -38,7 +38,7 @@
 
 ### AI（实际路由在 `/api/ai`、`/api/pdf`，此处为业务归类）
 
-task_type 示例：`resume_generate`, `project_optimize`, `jd_match`, `score`, `pdf_optimize`
+task_type 示例：`resume_generate`, `summary_optimize`, `skills_optimize`, `project_optimize`, `internship_optimize`, `work_experience_optimize`, `jd_match`, `jd_resume_optimize`, `pdf_jd_optimize`, `jd_image_extract`, `score`, `pdf_optimize`
 
 ### CRUD
 
@@ -114,9 +114,19 @@ task_type 示例：`resume_generate`, `project_optimize`, `jd_match`, `score`, `
 
 ## resume_json（AI 输出）
 
+适用范围：全行业、全职业阶段。Prompt 不得默认互联网、技术岗或校招，也不得补造无法从用户输入/JD 验证的经历、技能、资质与数字。
+
 扩展基本信息：`work_years`, `marital_status`, `height`, `weight`, `ethnicity`, `native_place`, `political_status`, `expected_salary`, `custom_fields: [{label,value}]`
 
 教育：`educations: [{school, major, degree, start_date, end_date}]`；扁平 `school/major/education` 与首条同步
+
+经历：
+
+- `projects: [{name, role, description, tech_stack, start_date, end_date}]`，其中 `tech_stack` 也可表达非技术岗位使用的专业技能、工具、平台或方法
+- `internships: [{company, position, description, start_date, end_date}]`
+- `work_experiences: [{company, position, department, description, start_date, end_date}]`
+
+分模块流式优化：`summary | skills | project | internship | work_experience`，分别记录对应 `*_optimize` task_type。
 
 规范化：`services/ai/ai.service.js` → `normalizeEducations`, `normalizePdfResume`, `buildResumeContext`
 

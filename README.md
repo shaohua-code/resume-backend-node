@@ -1,6 +1,6 @@
 # AI 简历助手后端服务
 
-基于 **Node.js + Express + PostgreSQL + JWT** 的简历 AI 后端 API，接入 DeepSeek 大模型提供简历生成、分模块优化、JD 匹配、简历评分、PDF 解析优化等能力。
+基于 **Node.js + Express + PostgreSQL + JWT** 的全行业简历 AI 后端 API，接入 DeepSeek 大模型，为技术、职能、销售、制造、教育、医疗、金融及其他岗位提供简历生成、分模块优化、JD 匹配、简历评分、PDF 解析优化等能力。
 
 ## 技术栈
 
@@ -94,7 +94,7 @@ POST /api/ai/generate              # AI 生成简历（同步）
 POST /api/ai/generate/stream       # AI 生成简历（SSE 流式）
 POST /api/ai/optimize              # 项目描述优化（同步，兼容旧接口）
 POST /api/ai/optimize/:type/stream # 分模块流式优化
-                                   # type: summary | skills | project | internship
+                                   # type: summary | skills | project | internship | work_experience
 POST /api/ai/optimize-by-jd/stream # 基于岗位 JD 流式优化整份简历（SSE）
 POST /api/ai/match                 # JD 岗位匹配
 POST /api/ai/score                 # AI 简历评分

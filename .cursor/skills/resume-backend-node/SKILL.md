@@ -3,18 +3,20 @@ name: resume-backend-node
 description: >-
   AI简历助手 Node.js 后端项目指南（Express + PostgreSQL + DeepSeek）。
   在 resume-backend-node 目录编写/修改 API、鉴权、AI 服务、钱包计费、数据库迁移时使用。
-  每次改动路由、表结构、权限或配置后须同步更新本 skill 与 reference.md。
+  每次进入项目任务先阅读本 skill、reference.md 与前端 skill；改动路由、字段、AI Prompt、
+  表结构、权限或配置后须同步更新本 skill、reference.md 与 docs/PRD.md。
 ---
 
 # resume-backend-node
 
-AI 简历助手校园版后端。Express 4 + PostgreSQL + JWT + DeepSeek API。**计费模式：账户余额 + AI 按次扣费（已移除 VIP 会员体系）。**
+AI 简历助手全行业后端。覆盖校招、社招、转岗以及技术、职能、销售、制造、教育、医疗、金融、服务业等岗位。Express 4 + PostgreSQL + JWT + DeepSeek API。**计费模式：账户余额 + AI 按次扣费（已移除 VIP 会员体系）。**
 
 ## 何时读取
 
 - 修改 `routers/`、`services/`、`middlewares/`、`utils/`
 - 新增 API、权限、AI 任务、钱包/流水、数据表
 - 排查 401/403/402、CORS、余额不足问题
+- 修改 AI Prompt、简历字段契约、前后端联动功能
 
 详细路由与表结构见 [reference.md](reference.md)。
 
@@ -34,7 +36,7 @@ services/
 middlewares/         # auth | permission
 utils/               # permissions.js | ai_cost.js
 database/
-  init.sql           # 建表（20 张表）
+  init.sql           # 建表（21 张表）
   TABLES.md          # 表中文对照
   ops/               # 运维 SQL
 ```
@@ -77,6 +79,14 @@ database/
 3. `ensureAiQuota()` + `recordAiCall()`（自动扣费）
 4. SSE：`data: ${JSON.stringify({ chunk | done | error })}\n\n`
 
+## AI Prompt 与简历字段约定
+
+1. 不得默认互联网、技术岗或校招；必须根据 `target_position`、JD 与原始经历选择行业表达。
+2. 不得编造公司、岗位、职责、技能、资质或量化结果；原文无数据时使用可核验的定性成果。
+3. `projects.tech_stack` 对非技术岗表示项目使用的专业技能、工具、平台或方法。
+4. 标准结构同时包含 `educations[]`、`projects[]`、`internships[]`、`work_experiences[]`、`skills[]`、`awards[]`、`certificates[]`。
+5. 分模块优化支持 `summary | skills | project | internship | work_experience`；默认方向使用“通用职业方向”。
+
 ## Skill 维护（必须）
 
-改动路由/表/权限/计费后同步更新本文件与 `reference.md`，并视情况更新前端 skill。
+每次项目任务先阅读本文件和前端 skill。改动路由、字段、Prompt、表、权限、计费或跨端行为后，同步更新本文件、`reference.md`、前端 skill（如相关）与 `../docs/PRD.md`。

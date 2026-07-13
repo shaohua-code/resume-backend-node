@@ -37,22 +37,18 @@ async function createResume(userId, body) {
     if (delError) {
       throw Object.assign(new Error(`替换旧简历失败：${delError.message}`), { statusCode: 500 });
     }
-    console.log('[create] 简历数量超限，已删除最早简历 id =', oldest.id);
   }
 
-  const { data, error, status, statusText } = await resumeRepo.createResume(userId, body);
-  console.log('[create] 数据库返回 status =', status, statusText);
+  const { data, error } = await resumeRepo.createResume(userId, body);
   if (error) {
     console.error('[create] 数据库 error =', error);
     throw Object.assign(new Error(`创建失败：${error.message}`), { code: error.code, statusCode: 500 });
   }
-  console.log('[create] 写入成功，data =', data);
   return { id: data.id };
 }
 
 async function updateResume(userId, resumeId, body) {
-  const { data, error, status, statusText } = await resumeRepo.updateResume(userId, resumeId, body);
-  console.log('[update] id =', resumeId, 'status =', status, statusText);
+  const { data, error } = await resumeRepo.updateResume(userId, resumeId, body);
   if (error) {
     console.error('[update] 数据库 error =', error);
     throw Object.assign(new Error(`更新失败：${error.message}`), { code: error.code, statusCode: 500 });
@@ -66,10 +62,8 @@ async function updateResume(userId, resumeId, body) {
 async function saveResume(userId, body) {
   const { id, title, resume_json, template_id, score } = body || {};
   if (id) {
-    console.log('[save] 更新简历 id =', id, 'user_id =', userId);
     return updateResume(userId, id, { title, resume_json, template_id, score });
   }
-  console.log('[save] 新建简历 user_id =', userId);
   return createResume(userId, { title, resume_json, template_id, score });
 }
 
