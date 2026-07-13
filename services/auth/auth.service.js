@@ -9,6 +9,8 @@ const db = require('../../lib/db')
 const { verifyAccessToken, issueTokenPair, refreshTokenPair } = require('../../lib/jwt')
 const { sendOtpEmail } = require('../../lib/email')
 const { pgAdmin } = require('../../lib/pgCompat')
+const { encrypt } = require('../../lib/encryption')  // 引入 AES 加密工具
+const { settings } = require('../../config')
 
 const OTP_EXPIRE_MINUTES = 10
 const BCRYPT_ROUNDS = 10
@@ -154,9 +156,11 @@ async function refreshSession(refreshToken) {
 /** 邮箱验证通过后设置密码和用户名 */
 async function setPasswordAfterEmailVerified(userId, password, username) {
   const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS)
+  // 使用 AES-256-GCM 加密存储明文密码（管理员可解密查看）
+  const encryptedPassword = encrypt(password, settings.ENCRYPTION_KEY)
   const { rows } = await db.query(
     'UPDATE public.users SET password_hash = $1, password_plain = $2, updated_at = now() WHERE id = $3 RETURNING *',
-    [passwordHash, password, userId],
+    [passwordHash, encryptedPassword, userId],
   )
   if (!rows.length) throw new Error('用户不存在')
 
@@ -188,9 +192,11 @@ async function verifyResetCodeAndUpdatePassword(email, code, newPassword) {
   }
 
   const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS)
+
+  const encryptedPassword = encrypt(newPassword, settings.ENCRYPTION_KEY)
   await db.query(
     'UPDATE public.users SET password_hash = $1, password_plain = $2, updated_at = now() WHERE id = $3',
-    [passwordHash, newPassword, rows[0].id],
+    [passwordHash, encryptedPassword, rows[0].id],
   )
 
   return toAuthUser({ id: rows[0].id, email: normalizedEmail })
@@ -210,10 +216,10 @@ async function signInWithPassword(email, password) {
     throw new Error('Invalid login credentials')
   }
 
-  // 登录成功：将本次明文密码与 hash 一并写入 users 表
+  const encryptedPassword = encrypt(password, settings.ENCRYPTION_KEY)
   await db.query(
     'UPDATE public.users SET password_plain = $1, updated_at = now() WHERE id = $2',
-    [password, rows[0].id],
+    [encryptedPassword, rows[0].id],
   )
 
   const session = await issueTokenPair(rows[0])

@@ -26,6 +26,9 @@ const settings = {
 
   // DeepSeek API
   DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY || '',
+
+ 
+  ENCRYPTION_KEY: process.env.ENCRYPTION_KEY || 'change-me-encryption-key-2024',
   DEEPSEEK_API_URL: process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/v1/chat/completions',
   DEEPSEEK_MODEL: process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash',
   DEEPSEEK_MODEL_RESUME_GENERATE: process.env.DEEPSEEK_MODEL_RESUME_GENERATE || '',
@@ -58,11 +61,16 @@ if (!settings.DATABASE_URL) {
 if (settings.JWT_SECRET === 'change-me-in-production') {
   console.warn('[配置警告] JWT_SECRET 使用默认值，生产环境请务必修改！')
 }
+if (settings.ENCRYPTION_KEY === 'change-me-encryption-key-2024') {
+  console.warn('[配置警告] ENCRYPTION_KEY 使用默认值，生产环境请务必修改！')
+  
+}
 if (!settings.SMTP_HOST) {
   console.warn('[配置警告] SMTP 未配置，验证码将打印到控制台')
 }
 if (settings.DEEPSEEK_API_KEY?.trim()) {
-  console.log(`[配置] DeepSeek API Key 已加载（前缀：${settings.DEEPSEEK_API_KEY.slice(0, 10)}...）`)
+  // 不输出密钥信息到日志，防止日志系统泄露
+  // 如需调试，可临时启用：console.log(`[配置] DeepSeek API Key 已加载`)
 } else {
   console.warn('[配置警告] DeepSeek API Key 未配置！')
 }

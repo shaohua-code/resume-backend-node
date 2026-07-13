@@ -9,8 +9,7 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 pnpm-lock.yaml
-
-
+scripts/decrypt-password.js 
 
 # ========== 虚拟环境 ==========
 venv/

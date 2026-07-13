@@ -23,8 +23,12 @@ const {
 } = require('../services/auth/auth.service');
 const { ensureUserProfile, getUserProfile } = require('../services/user_profile_service');
 const inviteService = require('../services/admin/admin.invite.service');
+const { authLimiter, registerLimiter } = require('../middlewares/rateLimiter');  // 引入速率限制
 
 const router = express.Router();
+
+// 对所有认证接口应用严格速率限制（每 IP 每分钟 5 次）
+router.use(authLimiter);
 
 /**
  * 发送验证码接口

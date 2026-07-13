@@ -10,6 +10,7 @@ const { settings } = require('./config')
 const routes = require('./routers')
 const { errorHandler } = require('./middlewares/errorHandler')
 const { ensureUploadDirs, UPLOAD_ROOT } = require('./lib/uploadPaths')
+const { globalLimiter } = require('./middlewares/rateLimiter')  // 引入全局速率限制
 
 const app = express()
 
@@ -33,7 +34,10 @@ app.use(
   }),
 )
 
-// 健康检查入口
+// 全局速率限制（基础 DDoS 防护）
+app.use('/api', globalLimiter)
+
+// 健康检查入口（不受速率限制影响）
 app.get('/', (req, res) => {
   res.json({ message: 'AI Res111ume Assistant API is running', version: '1.0.0', backend: 'PostgreSQL' })
 })
