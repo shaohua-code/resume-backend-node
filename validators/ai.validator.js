@@ -5,7 +5,8 @@
 
 const { body, param } = require('express-validator')
 
-const ALLOWED_OPTIMIZE_TYPES = ['summary', 'skills', 'project', 'internship']
+// 支持的优化类型：个人评价、技能特长、项目经历、实习经历、工作经历（正式全职）
+const ALLOWED_OPTIMIZE_TYPES = ['summary', 'skills', 'project', 'internship', 'work_experience']
 
 /**
  * AI 生成简历参数校验

@@ -50,7 +50,7 @@ router.post('/extract-jd-image', aiController.extractJdImage)
 /**
  * 分模块 AI 流式优化
  * POST /api/ai/optimize/:type/stream
- * type 可选：summary（个人评价）、skills（技能特长）、project（项目经历）、internship（实习经历）
+ * type 可选：summary（个人评价）、skills（技能特长）、project（项目经历）、internship（实习经历）、work_experience（工作经历）
  */
 router.post('/optimize/:type/stream', aiValidator.optimizeStream, validate, aiController.optimizeStream)
 

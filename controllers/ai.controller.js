@@ -228,12 +228,18 @@ async function extractJdImage(req, res) {
 
 async function optimizeStream(req, res) {
   const type = req.params.type;
-  const allowedTypes = ['summary', 'skills', 'project', 'internship'];
+  // 支持的优化类型（含工作经历）
+  const allowedTypes = ['summary', 'skills', 'project', 'internship', 'work_experience'];
   if (!allowedTypes.includes(type)) {
     return error(res, 400, `不支持的优化类型：${type}`);
   }
 
-  const taskType = type === 'internship' ? 'internship_optimize' : `${type}_optimize`;
+  // 任务类型映射（work_experience 使用独立标识）
+  const taskTypeMap = {
+    internship: 'internship_optimize',
+    work_experience: 'work_experience_optimize',
+  };
+  const taskType = taskTypeMap[type] || `${type}_optimize`;
   const model = getRequestedModel(req);
   const { resume, index } = req.body || {};
   const targetPosition = resume?.target_position || '';
@@ -271,6 +277,16 @@ async function optimizeStream(req, res) {
         return res.end();
       }
       serviceResult = await aiService.optimizeInternshipStream(internship, resume, targetPosition, { model }, (chunk) => {
+        sendEvent({ chunk });
+      });
+    } else if (type === 'work_experience') {
+      // 工作经历（正式全职）优化
+      const workExp = resume?.work_experiences?.[index];
+      if (!workExp) {
+        sendEvent({ error: '工作经历不存在' });
+        return res.end();
+      }
+      serviceResult = await aiService.optimizeWorkExperienceStream(workExp, resume, targetPosition, { model }, (chunk) => {
         sendEvent({ chunk });
       });
     }

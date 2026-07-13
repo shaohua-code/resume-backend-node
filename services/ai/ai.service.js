@@ -20,6 +20,8 @@ const {
   OPTIMIZE_SUMMARY_PROMPT,
   OPTIMIZE_SKILLS_PROMPT,
   OPTIMIZE_INTERNSHIP_PROMPT,
+  // 工作经历（正式全职）优化 Prompt
+  OPTIMIZE_WORK_EXPERIENCE_PROMPT,
   JD_MATCH_PROMPT,
   SCORE_PROMPT,
   PDF_OPTIMIZE_PROMPT,
@@ -334,6 +336,17 @@ function normalizePdfResume(data) {
     skills: Array.isArray(source.skills) ? source.skills.filter(Boolean) : [],
     projects: Array.isArray(source.projects) ? source.projects.map(normalizeProject) : [],
     internships: Array.isArray(source.internships) ? source.internships.map(normalizeInternship) : [],
+    // 工作经历（正式全职工作，区别于实习）
+    work_experiences: Array.isArray(source.work_experiences)
+      ? source.work_experiences.map((w) => ({
+          company: w.company || '',
+          position: w.position || '',
+          department: w.department || '',
+          description: w.description || '',
+          start_date: w.start_date || '',
+          end_date: w.end_date || '',
+        }))
+      : [],
     awards: Array.isArray(source.awards) ? source.awards.filter(Boolean) : [],
     certificates: Array.isArray(source.certificates) ? source.certificates.filter(Boolean) : [],
   };
@@ -347,11 +360,12 @@ function hasResumeContent(resume) {
       resume.summary ||
       resume.school ||
       (Array.isArray(resume.educations) && resume.educations.length) ||
-      resume.projects.length ||
-      resume.internships.length ||
-      resume.skills.length ||
-      resume.awards.length ||
-      resume.certificates.length,
+      (Array.isArray(resume.projects) && resume.projects.length) ||
+      (Array.isArray(resume.internships) && resume.internships.length) ||
+      (Array.isArray(resume.work_experiences) && resume.work_experiences.length) ||
+      (Array.isArray(resume.skills) && resume.skills.length) ||
+      (Array.isArray(resume.awards) && resume.awards.length) ||
+      (Array.isArray(resume.certificates) && resume.certificates.length),
   );
 }
 
@@ -394,6 +408,14 @@ function buildResumeContext(resume) {
       return `- ${i.company || ''}（${i.position || ''}）：${i.description || ''}`;
     }).join('\n');
     parts.push(`实习经历：\n${internText}`);
+  }
+  // 工作经历（正式全职工作）
+  if (Array.isArray(data.work_experiences) && data.work_experiences.length) {
+    const workText = data.work_experiences.map((w) => {
+      const dept = w.department ? `[${w.department}]` : '';
+      return `- ${w.company || ''}${dept}（${w.position || ''}）${w.start_date || ''}~${w.end_date || ''}：${w.description || ''}`;
+    }).join('\n');
+    parts.push(`工作经历：\n${workText}`);
   }
   parts.push(`个人评价：${data.summary || ''}`);
   return parts.join('\n');
@@ -517,6 +539,30 @@ async function optimizeInternshipStream(internship, resume, targetPosition = '',
   const { content, usage, model, cost } = await callDeepseekStream(
     prompt,
     { task: AI_TASK.INTERNSHIP_OPTIMIZE, model: options.model },
+    onChunk,
+  );
+  return { data: extractJson(content), meta: { model, usage, cost } };
+}
+
+/**
+ * 工作经历（正式全职）AI 流式优化
+ * 基于已填写的工作描述，使用 STAR 法则优化为更专业的表述
+ * @param {object} workExp 单条工作经历对象
+ * @param {object} resume 完整简历对象（用于构建上下文）
+ * @param {string} targetPosition 目标岗位
+ * @param {object} options 模型等配置
+ * @param {function} onChunk 流式回调
+ */
+async function optimizeWorkExperienceStream(workExp, resume, targetPosition = '', options = {}, onChunk) {
+  // 使用工作经历专用 Prompt（区别于实习，强调职业深度和业务价值）
+  const prompt = format(OPTIMIZE_WORK_EXPERIENCE_PROMPT, {
+    work_experience_description: workExp.description || '',
+    target_position: targetPosition || '通用技术岗位',
+    resume_context: buildResumeContext(resume),
+  });
+  const { content, usage, model, cost } = await callDeepseekStream(
+    prompt,
+    { task: AI_TASK.WORK_EXPERIENCE_OPTIMIZE, model: options.model },
     onChunk,
   );
   return { data: extractJson(content), meta: { model, usage, cost } };
@@ -695,6 +741,8 @@ module.exports = {
   optimizeSummaryStream,
   optimizeSkillsStream,
   optimizeInternshipStream,
+  // 工作经历（正式全职）优化
+  optimizeWorkExperienceStream,
   matchJd,
   scoreResume,
   optimizeFromPdfText,

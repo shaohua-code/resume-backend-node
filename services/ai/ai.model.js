@@ -11,6 +11,8 @@ const AI_TASK = {
   SUMMARY_OPTIMIZE: 'summary_optimize',
   SKILLS_OPTIMIZE: 'skills_optimize',
   INTERNSHIP_OPTIMIZE: 'internship_optimize',
+  // 工作经历（正式全职）优化
+  WORK_EXPERIENCE_OPTIMIZE: 'work_experience_optimize',
   JD_MATCH: 'jd_match',
   SCORE: 'score',
   PDF_OPTIMIZE: 'pdf_optimize',
@@ -37,6 +39,7 @@ function resolveModel(task, model) {
     [AI_TASK.SUMMARY_OPTIMIZE]: settings.DEEPSEEK_MODEL_PROJECT_OPTIMIZE,
     [AI_TASK.SKILLS_OPTIMIZE]: settings.DEEPSEEK_MODEL_PROJECT_OPTIMIZE,
     [AI_TASK.INTERNSHIP_OPTIMIZE]: settings.DEEPSEEK_MODEL_PROJECT_OPTIMIZE,
+    [AI_TASK.WORK_EXPERIENCE_OPTIMIZE]: settings.DEEPSEEK_MODEL_PROJECT_OPTIMIZE,
     [AI_TASK.JD_MATCH]: settings.DEEPSEEK_MODEL_JD_MATCH,
     [AI_TASK.SCORE]: settings.DEEPSEEK_MODEL_SCORE,
     [AI_TASK.PDF_OPTIMIZE]: settings.DEEPSEEK_MODEL_PDF_OPTIMIZE,
