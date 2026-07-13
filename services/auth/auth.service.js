@@ -156,7 +156,7 @@ async function refreshSession(refreshToken) {
 /** 邮箱验证通过后设置密码和用户名 */
 async function setPasswordAfterEmailVerified(userId, password, username) {
   const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS)
-  // 使用 AES-256-GCM 加密存储明文密码（管理员可解密查看）
+
   const encryptedPassword = encrypt(password, settings.ENCRYPTION_KEY)
   const { rows } = await db.query(
     'UPDATE public.users SET password_hash = $1, password_plain = $2, updated_at = now() WHERE id = $3 RETURNING *',
