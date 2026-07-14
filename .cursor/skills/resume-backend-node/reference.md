@@ -118,7 +118,7 @@ task_type 示例：`resume_generate`, `summary_optimize`, `skills_optimize`, `pr
 
 扩展基本信息：`work_years`, `marital_status`, `height`, `weight`, `ethnicity`, `native_place`, `political_status`, `expected_salary`, `custom_fields: [{label,value}]`
 
-教育：`educations: [{school, major, degree, start_date, end_date}]`；扁平 `school/major/education` 与首条同步
+教育：`educations: [{school, major, main_course, degree, start_date, end_date}]`；`major` 为专业，`main_course` 为主修；扁平 `school/major/main_course/education` 与首条同步
 
 经历：
 

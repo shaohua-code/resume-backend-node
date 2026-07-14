@@ -203,6 +203,7 @@ function normalizeEducationItem(item = {}) {
   return {
     school: item.school || '',
     major: item.major || '',
+    main_course: item.main_course || item.mainCourse || '',
     degree: item.degree || item.education || '',
     start_date: item.start_date || '',
     end_date: item.end_date || '',
@@ -225,19 +226,20 @@ function normalizeEducations(source = {}) {
   if (Array.isArray(list) && list.length) {
     return list
       .map(normalizeEducationItem)
-      .filter((item) => item.school || item.major || item.degree || item.start_date || item.end_date);
+      .filter((item) => item.school || item.major || item.main_course || item.degree || item.start_date || item.end_date);
   }
 
   if (Array.isArray(source.education) && source.education.length) {
     return source.education
       .map(normalizeEducationItem)
-      .filter((item) => item.school || item.major || item.degree || item.start_date || item.end_date);
+      .filter((item) => item.school || item.major || item.main_course || item.degree || item.start_date || item.end_date);
   }
 
-  if (source.school || source.major || source.education || source.degree) {
+  if (source.school || source.major || source.main_course || source.mainCourse || source.education || source.degree) {
     return [normalizeEducationItem({
       school: source.school,
       major: source.major,
+      main_course: source.main_course || source.mainCourse,
       degree: source.education || source.degree,
     })];
   }
@@ -332,6 +334,7 @@ function normalizePdfResume(data) {
     educations,
     school: source.school || firstEdu.school || '',
     major: source.major || firstEdu.major || '',
+    main_course: source.main_course || source.mainCourse || firstEdu.main_course || '',
     education: source.education || firstEdu.degree || source.degree || '',
     skills: Array.isArray(source.skills) ? source.skills.filter(Boolean) : [],
     projects: Array.isArray(source.projects) ? source.projects.map(normalizeProject) : [],
@@ -386,11 +389,11 @@ function buildResumeContext(resume) {
   if (educations.length) {
     const eduText = educations.map((e) => {
       const range = [e.start_date, e.end_date].filter(Boolean).join('~');
-      return `- ${e.school || ''} ${e.major || ''} ${e.degree || ''}${range ? `（${range}）` : ''}`;
+      return `- ${e.school || ''} ${e.major || ''} ${e.main_course || ''} ${e.degree || ''}${range ? `（${range}）` : ''}`;
     }).join('\n');
     parts.push(`教育背景：\n${eduText}`);
   } else {
-    parts.push(`学校：${data.school || ''} ${data.major || ''} ${data.education || ''}`);
+    parts.push(`学校：${data.school || ''} ${data.major || ''} ${data.main_course || data.mainCourse || ''} ${data.education || ''}`);
   }
 
   if (Array.isArray(data.skills) && data.skills.length) {
