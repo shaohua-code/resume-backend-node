@@ -17,6 +17,7 @@ const MODEL_FIELDS = [
   'input_price_per_million',
   'cached_input_price_per_million',
   'output_price_per_million',
+  'thinking_enabled',
   'enabled',
 ];
 
@@ -61,6 +62,12 @@ function normalizeModelPayload(body = {}, partial = false) {
       if (!Number.isFinite(value) || value < 0) throw badRequest('模型单价必须是大于等于 0 的数字');
       payload[field] = value;
     }
+  }
+  // thinking_enabled is nullable: null = provider default, true/false = force request parameter.
+  if (Object.prototype.hasOwnProperty.call(payload, 'thinking_enabled')) {
+    payload.thinking_enabled = payload.thinking_enabled === null || payload.thinking_enabled === ''
+      ? null
+      : Boolean(payload.thinking_enabled);
   }
   if (Object.prototype.hasOwnProperty.call(payload, 'enabled')) payload.enabled = Boolean(payload.enabled);
   return payload;

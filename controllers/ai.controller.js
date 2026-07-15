@@ -342,6 +342,28 @@ async function score(req, res) {
   }
 }
 
+async function scoreStream(req, res) {
+  const taskType = 'score';
+  const model = getRequestedModel(req);
+  const sendEvent = setupSSE(res);
+  try {
+    await ensureAiQuota(req, taskType);
+    const resumeId = req.query.resume_id || req.body?.resume_id;
+    const resumeJson = await getResumeJson(req, resumeId);
+    const { data: scoreData, meta } = await aiService.scoreResumeStream(resumeJson, { model }, (chunk) => {
+      sendEvent({ chunk });
+    });
+    await recordAiCall(req, taskType, model, true, '', meta);
+    sendEvent({ done: true, data: scoreData });
+    return res.end();
+  } catch (e) {
+    return respondAiError(res, e, {
+      sendEvent,
+      recordFn: (msg) => recordAiCall(req, taskType, model, false, msg),
+    });
+  }
+}
+
 module.exports = {
   generate,
   generateStream,
@@ -351,4 +373,5 @@ module.exports = {
   optimizeStream,
   matchJd,
   score,
+  scoreStream,
 };

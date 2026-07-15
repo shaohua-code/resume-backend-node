@@ -148,6 +148,7 @@ CREATE TABLE IF NOT EXISTS public.ai_model (
   input_price_per_million  NUMERIC(10, 4) DEFAULT 0,
   cached_input_price_per_million NUMERIC(10, 4) DEFAULT 0,
   output_price_per_million NUMERIC(10, 4) DEFAULT 0,
+  thinking_enabled         BOOLEAN DEFAULT NULL, -- NULL 使用供应商默认；true/false 强制传 enable_thinking
   enabled                  BOOLEAN DEFAULT true,
   create_time              TIMESTAMPTZ DEFAULT now(),
   update_time              TIMESTAMPTZ DEFAULT now()
@@ -321,12 +322,12 @@ ON CONFLICT (config_key) DO NOTHING;
 
 INSERT INTO public.ai_model (
   name, model_key, task_type, provider, model_type, api_key_env,
-  input_price_per_million, cached_input_price_per_million, output_price_per_million, enabled
+  input_price_per_million, cached_input_price_per_million, output_price_per_million, thinking_enabled, enabled
 )
 VALUES
-  ('DeepSeek V4 Flash', 'deepseek-v4-flash', 'all', 'deepseek', 'text', 'DEEPSEEK_API_KEY', 1.0, 0.02, 2.0, true),
-  ('DeepSeek Chat（兼容别名，即将下线）', 'deepseek-chat', 'all', 'deepseek', 'text', 'DEEPSEEK_API_KEY', 1.0, 0.02, 2.0, false),
-  ('Qwen3.6 Flash 视觉模型', 'qwen3.6-flash', 'all', 'dashscope', 'vision', 'DASHSCOPE_API_KEY', 1.2, 0.24, 7.2, true)
+  ('DeepSeek V4 Flash', 'deepseek-v4-flash', 'all', 'deepseek', 'text', 'DEEPSEEK_API_KEY', 1.0, 0.02, 2.0, NULL, true),
+  ('DeepSeek Chat（兼容别名，即将下线）', 'deepseek-chat', 'all', 'deepseek', 'text', 'DEEPSEEK_API_KEY', 1.0, 0.02, 2.0, NULL, false),
+  ('Qwen3.6 Flash 视觉模型', 'qwen3.6-flash', 'all', 'dashscope', 'vision', 'DASHSCOPE_API_KEY', 1.2, 0.24, 7.2, NULL, true)
 ON CONFLICT (model_key) DO NOTHING;
 
 INSERT INTO public.ai_task_model (task_type, required_model_type, model_id)

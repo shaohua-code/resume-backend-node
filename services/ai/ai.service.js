@@ -23,6 +23,7 @@ const {
   OPTIMIZE_WORK_EXPERIENCE_PROMPT,
   JD_MATCH_PROMPT,
   SCORE_PROMPT,
+  SCORE_STREAM_PROMPT,
   PDF_OPTIMIZE_PROMPT,
   JD_RESUME_OPTIMIZE_PROMPT,
   PDF_JD_OPTIMIZE_PROMPT,
@@ -53,6 +54,14 @@ function assertRuntimeConfig(runtime) {
   }
 }
 
+function applyRuntimeOptions(payload, runtime) {
+  // Nullable switch: null keeps provider defaults, boolean explicitly controls thinking mode.
+  if (typeof runtime.thinkingEnabled === 'boolean') {
+    payload.enable_thinking = runtime.thinkingEnabled;
+  }
+  return payload;
+}
+
 /**
  * OpenAI Chat Completions 兼容接口通用方法（历史函数名保留为内部兼容）。
  * @returns {Promise<{ content: string, usage: object, model: string, cost: number }>}
@@ -71,6 +80,7 @@ async function callDeepseek(prompt, options = {}) {
     temperature: 0.7,
     max_tokens: 4096,
   };
+  applyRuntimeOptions(payload, runtime);
   const response = await axios.post(runtime.apiUrl, payload, {
     headers,
     timeout: 60000,
@@ -105,6 +115,7 @@ async function callDeepseekStream(prompt, options = {}, onChunk) {
     stream: true,
     stream_options: { include_usage: true },
   };
+  applyRuntimeOptions(payload, runtime);
   const response = await axios.post(runtime.apiUrl, payload, {
     headers,
     timeout: 120000,
@@ -177,6 +188,7 @@ async function callDeepseekVision(imageBuffer, mimeType, textPrompt, options = {
     temperature: 0.3,
     max_tokens: 4096,
   };
+  applyRuntimeOptions(payload, runtime);
   const response = await axios.post(runtime.apiUrl, payload, {
     headers,
     timeout: 90000,
@@ -610,6 +622,64 @@ async function scoreResume(resumeContent, options = {}) {
   };
 }
 
+function parseScorePayload(content) {
+  const jsonMatch = String(content || '').match(/<SCORE_JSON>([\s\S]*?)<\/SCORE_JSON>/i);
+  const parsed = jsonMatch ? extractJson(jsonMatch[1]) : extractJson(content);
+  return {
+    content_completeness: parsed.content_completeness || 0,
+    skill_match: parsed.skill_match || 0,
+    project_quality: parsed.project_quality || 0,
+    resume_structure: parsed.resume_structure || 0,
+    format_quality: parsed.format_quality || 0,
+    total: parsed.total || 0,
+  };
+}
+
+function createScoreVisibleChunkHandler(onChunk) {
+  let buffer = '';
+  let hidden = false;
+  return (chunk) => {
+    // Hide the internal <SCORE_JSON> block from users while still keeping it in full content for parsing.
+    buffer += chunk;
+    let visible = '';
+    while (buffer) {
+      if (hidden) {
+        const end = buffer.search(/<\/SCORE_JSON>/i);
+        if (end === -1) {
+          buffer = '';
+          break;
+        }
+        buffer = buffer.slice(end).replace(/^<\/SCORE_JSON>/i, '');
+        hidden = false;
+        continue;
+      }
+
+      const start = buffer.search(/<SCORE_JSON>/i);
+      if (start === -1) {
+        // Keep a short tail so a split "<SCORE_JSON>" tag is not leaked to the UI.
+        if (buffer.length <= 20) break;
+        visible += buffer.slice(0, -20);
+        buffer = buffer.slice(-20);
+        break;
+      }
+      visible += buffer.slice(0, start);
+      buffer = buffer.slice(start).replace(/^<SCORE_JSON>/i, '');
+      hidden = true;
+    }
+    if (visible && typeof onChunk === 'function') onChunk(visible);
+  };
+}
+
+async function scoreResumeStream(resumeContent, options = {}, onChunk) {
+  const prompt = format(SCORE_STREAM_PROMPT, { resume_content: resumeContent });
+  const { content, usage, model, cost } = await callDeepseekStream(
+    prompt,
+    { task: AI_TASK.SCORE, model: options.model },
+    createScoreVisibleChunkHandler(onChunk),
+  );
+  return { data: parseScorePayload(content), meta: { model, usage, cost } };
+}
+
 /**
  * 基于 PDF 文本整体优化简历（非流式）
  */
@@ -749,6 +819,7 @@ module.exports = {
   optimizeWorkExperienceStream,
   matchJd,
   scoreResume,
+  scoreResumeStream,
   optimizeFromPdfText,
   optimizeFromPdfTextStream,
   optimizePdfByJdStream,

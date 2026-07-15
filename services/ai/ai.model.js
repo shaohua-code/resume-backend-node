@@ -77,6 +77,8 @@ function toRuntime(model) {
     apiUrl: String(model.api_url || defaults.apiUrl || '').trim(),
     apiKeyEnv,
     apiKey: String(process.env[apiKeyEnv] || defaults.apiKey || '').trim(),
+    // null keeps the provider default; true/false explicitly toggles thinking-capable models.
+    thinkingEnabled: typeof model.thinking_enabled === 'boolean' ? model.thinking_enabled : null,
   };
 }
 

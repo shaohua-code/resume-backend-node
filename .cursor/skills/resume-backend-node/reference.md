@@ -91,7 +91,7 @@ task_type 示例：`resume_generate`, `summary_optimize`, `skills_optimize`, `pr
 | ai_call_record | task_type, model, tokens, cost, success |
 | system_config | config_key, config_value(jsonb) — 含 `register_gift_amount` |
 | announcement | title, content, enabled |
-| ai_model | model_key, provider, model_type, api_url, api_key_env, input/cached_input/output_price_per_million, enabled |
+| ai_model | model_key, provider, model_type, api_url, api_key_env, input/cached_input/output_price_per_million, thinking_enabled, enabled |
 | ai_task_model | task_type(unique), required_model_type, model_id |
 | admin_action_log | admin_user_id, action, target_type/id |
 | user_feedback | content_html, content_md |
@@ -122,6 +122,7 @@ task_type 示例：`resume_generate`, `summary_optimize`, `skills_optimize`, `pr
 - 超管在 `/admin/models` 维护模型，在 `/admin/task-models` 为每个任务选择模型。
 - 运行时优先级：`ai_task_model` 后台映射 > 兼容的请求模型参数 > `.env` 回退。
 - 密钥只配置在 `api_key_env` 指向的服务端环境变量中，不保存明文。
+- `thinking_enabled` 为三态开关：`NULL` 使用供应商默认；`true/false` 会向兼容接口传 `enable_thinking`。
 
 ## resume_json（AI 输出）
 

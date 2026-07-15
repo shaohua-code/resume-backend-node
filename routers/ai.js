@@ -66,4 +66,10 @@ router.post('/match', aiValidator.matchJd, validate, aiController.matchJd)
  */
 router.post('/score', aiValidator.score, validate, aiController.score)
 
+/**
+ * AI 绠€鍘嗚瘎鍒嗭紙SSE 娴佸紡锛?
+ * POST /api/ai/score/stream
+ */
+router.post('/score/stream', aiValidator.score, validate, aiController.scoreStream)
+
 module.exports = router
