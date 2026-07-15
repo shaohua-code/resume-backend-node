@@ -148,12 +148,17 @@ async function callDeepseekStream(prompt, options = {}, onChunk) {
 
 /**
  * 多模态视觉调用：从图片提取文本（非流式）
+   * 优先使用阿里云 DashScope 视觉模型（Qwen3.6-Flash），降级到 DeepSeek
  * @param {Buffer} imageBuffer 图片二进制
  * @param {string} mimeType 如 image/jpeg
  */
 async function callDeepseekVision(imageBuffer, mimeType, textPrompt, options = {}) {
-  if (!settings.DEEPSEEK_API_KEY || !settings.DEEPSEEK_API_KEY.trim()) {
-    const err = new Error('DeepSeek API Key 未配置！');
+  // 优先 DashScope 视觉模型，降级到 DeepSeek
+  const dashscopeKey = (settings.DASHSCOPE_API_KEY || '').trim();
+  const apiKey = dashscopeKey || (settings.DEEPSEEK_API_KEY || '').trim();
+  const apiUrl = dashscopeKey ? settings.DASHSCOPE_API_URL : settings.DEEPSEEK_API_URL;
+  if (!apiKey) {
+    const err = new Error('视觉模型 API Key 未配置（DASHSCOPE_API_KEY 或 DEEPSEEK_API_KEY）');
     err.code = 'CONFIG_MISSING';
     throw err;
   }
@@ -161,7 +166,7 @@ async function callDeepseekVision(imageBuffer, mimeType, textPrompt, options = {
   const base64 = imageBuffer.toString('base64');
   const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${base64}`;
   const headers = {
-    Authorization: `Bearer ${settings.DEEPSEEK_API_KEY.trim()}`,
+    Authorization: `Bearer ${apiKey}`,
     'Content-Type': 'application/json',
   };
   const payload = {
@@ -176,7 +181,7 @@ async function callDeepseekVision(imageBuffer, mimeType, textPrompt, options = {
     temperature: 0.3,
     max_tokens: 4096,
   };
-  const response = await axios.post(settings.DEEPSEEK_API_URL, payload, {
+  const response = await axios.post(apiUrl, payload, {
     headers,
     timeout: 90000,
   });
