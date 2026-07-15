@@ -140,12 +140,26 @@ CREATE TABLE IF NOT EXISTS public.ai_model (
   id                       BIGSERIAL PRIMARY KEY,
   name                     TEXT NOT NULL,
   model_key                TEXT UNIQUE NOT NULL,
-  task_type                TEXT DEFAULT 'all',
+  task_type                TEXT DEFAULT 'all', -- 兼容旧数据；任务分配改由 ai_task_model 维护
+  provider                 TEXT NOT NULL DEFAULT 'deepseek',
+  model_type               TEXT NOT NULL DEFAULT 'text',
+  api_url                  TEXT DEFAULT '',
+  api_key_env              TEXT DEFAULT '',
   input_price_per_million  NUMERIC(10, 4) DEFAULT 0,
+  cached_input_price_per_million NUMERIC(10, 4) DEFAULT 0,
   output_price_per_million NUMERIC(10, 4) DEFAULT 0,
   enabled                  BOOLEAN DEFAULT true,
   create_time              TIMESTAMPTZ DEFAULT now(),
   update_time              TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.ai_task_model (
+  id                  BIGSERIAL PRIMARY KEY,
+  task_type           TEXT UNIQUE NOT NULL,
+  required_model_type TEXT NOT NULL DEFAULT 'text',
+  model_id            BIGINT NOT NULL REFERENCES public.ai_model(id) ON DELETE RESTRICT,
+  create_time         TIMESTAMPTZ DEFAULT now(),
+  update_time         TIMESTAMPTZ DEFAULT now()
 );
 
 -- ========== 6. 系统配置 ==========
@@ -305,8 +319,31 @@ VALUES
   ('recharge_email_user_confirm', '{"subject":"【AI简历助手】充值已到账","html":"","text":""}'::jsonb, '管理员确认充值后通知用户的邮件模板')
 ON CONFLICT (config_key) DO NOTHING;
 
-INSERT INTO public.ai_model (name, model_key, task_type, input_price_per_million, output_price_per_million, enabled)
+INSERT INTO public.ai_model (
+  name, model_key, task_type, provider, model_type, api_key_env,
+  input_price_per_million, cached_input_price_per_million, output_price_per_million, enabled
+)
 VALUES
-  ('DeepSeek 默认模型', 'deepseek-v4-flash', 'all', 0.5, 2.0, true),
-  ('DeepSeek 高级模型', 'deepseek-chat', 'all', 2.0, 8.0, true)
+  ('DeepSeek V4 Flash', 'deepseek-v4-flash', 'all', 'deepseek', 'text', 'DEEPSEEK_API_KEY', 1.0, 0.02, 2.0, true),
+  ('DeepSeek Chat（兼容别名，即将下线）', 'deepseek-chat', 'all', 'deepseek', 'text', 'DEEPSEEK_API_KEY', 1.0, 0.02, 2.0, false),
+  ('Qwen3.6 Flash 视觉模型', 'qwen3.6-flash', 'all', 'dashscope', 'vision', 'DASHSCOPE_API_KEY', 1.2, 0.24, 7.2, true)
 ON CONFLICT (model_key) DO NOTHING;
+
+INSERT INTO public.ai_task_model (task_type, required_model_type, model_id)
+SELECT task.task_type, task.required_model_type, model.id
+FROM (VALUES
+  ('resume_generate', 'text', 'deepseek-v4-flash'),
+  ('project_optimize', 'text', 'deepseek-v4-flash'),
+  ('summary_optimize', 'text', 'deepseek-v4-flash'),
+  ('skills_optimize', 'text', 'deepseek-v4-flash'),
+  ('internship_optimize', 'text', 'deepseek-v4-flash'),
+  ('work_experience_optimize', 'text', 'deepseek-v4-flash'),
+  ('jd_match', 'text', 'deepseek-v4-flash'),
+  ('score', 'text', 'deepseek-v4-flash'),
+  ('pdf_optimize', 'text', 'deepseek-v4-flash'),
+  ('jd_resume_optimize', 'text', 'deepseek-v4-flash'),
+  ('pdf_jd_optimize', 'text', 'deepseek-v4-flash'),
+  ('jd_image_extract', 'vision', 'qwen3.6-flash')
+) AS task(task_type, required_model_type, model_key)
+JOIN public.ai_model model ON model.model_key = task.model_key
+ON CONFLICT (task_type) DO NOTHING;

@@ -115,9 +115,18 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | 项 | 说明 |
 |---|---|
 | 主键 | `id` (BIGSERIAL) |
-| 核心字段 | `name`、`model_key`（唯一）、`task_type`、输入/输出单价、`enabled` |
-| 关联 | 无 FK，按 `model_key` 被计费逻辑引用 |
-| 代码路径 | `utils/ai_cost.js`、`services/admin/admin.crud.service.js` |
+| 核心字段 | `name`、`model_key`（唯一）、`provider`、`model_type`、`api_url`、`api_key_env`、输入/缓存输入/输出单价、`enabled` |
+| 关联 | 按 `model_key` 被计费逻辑引用；被 `ai_task_model.model_id` 引用 |
+| 代码路径 | `utils/ai_cost.js`、`services/ai/ai.model.js`、`services/admin/admin.aiModel.service.js` |
+
+### ai_task_model — AI 任务模型映射表
+
+| 项 | 说明 |
+|---|---|
+| 主键 | `id` (BIGSERIAL) |
+| 核心字段 | `task_type`（唯一）、`required_model_type`、`model_id` |
+| 关联 | `model_id` → `ai_model.id`（RESTRICT） |
+| 代码路径 | `services/ai/ai.model.js`、`services/admin/admin.aiModel.service.js` |
 
 ---
 
@@ -263,7 +272,8 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | `membership_plan` | 会员套餐表 | 套餐配置（已弱化 VIP） |
 | `order_record` | 订单表 | 支付订单 |
 | `ai_call_record` | AI 调用记录表 | Token 用量与费用 |
-| `ai_model` | AI 模型配置表 | 模型单价 |
+| `ai_model` | AI 模型配置表 | 模型类型、供应商、调用入口与 Token 单价 |
+| `ai_task_model` | AI 任务模型映射表 | 每个任务当前使用的模型 |
 | `system_config` | 系统配置表 | 注册赠送额、超管额度池等 |
 | `announcement` | 公告表 | 前台公告 |
 | `admin_action_log` | 管理员操作日志 | 审计 |

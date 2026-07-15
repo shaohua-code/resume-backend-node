@@ -1,13 +1,13 @@
 # AI 简历助手后端服务
 
-基于 **Node.js + Express + PostgreSQL + JWT** 的全行业简历 AI 后端 API，接入 DeepSeek 大模型，为技术、职能、销售、制造、教育、医疗、金融及其他岗位提供简历生成、分模块优化、JD 匹配、简历评分、PDF 解析优化等能力。
+基于 **Node.js + Express + PostgreSQL + JWT** 的全行业简历 AI 后端 API，当前使用 DeepSeek V4 Flash 处理文本任务、Qwen3.6 Flash 处理视觉任务，并支持由超级管理员按任务切换 OpenAI 兼容模型。
 
 ## 技术栈
 
 - 运行框架：[Express](https://expressjs.com/) 4.x
 - 数据库：[PostgreSQL](https://www.postgresql.org/)（直连 `pg` 驱动）
 - 认证：JWT + bcrypt + QQ/163 SMTP 邮箱验证码
-- AI 能力：[DeepSeek API](https://platform.deepseek.com/)
+- AI 能力：[DeepSeek API](https://platform.deepseek.com/) + [阿里云百炼](https://help.aliyun.com/zh/model-studio/)
 - 文件上传：[multer](https://github.com/expressjs/multer)
 - PDF 解析：[pdf-parse](https://github.com/mozilla/pdf-parse)
 - 参数校验：[express-validator](https://express-validator.github.io/)
@@ -137,6 +137,11 @@ SMTP_PASS=授权码
 DEEPSEEK_API_KEY=your-deepseek-api-key
 DEEPSEEK_API_URL=https://api.deepseek.com/v1/chat/completions
 
+# 阿里云百炼 Qwen 视觉模型
+DASHSCOPE_API_KEY=your-dashscope-api-key
+DASHSCOPE_API_URL=https://your-workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions
+DASHSCOPE_MODEL_VISION=qwen3.6-flash
+
 # 上传目录（生产建议 /var/www/resume-uploads）
 UPLOAD_DIR=/var/www/resume-uploads
 
@@ -185,7 +190,7 @@ psql -h 127.0.0.1 -U ai_resume -d ai_resume -f database/init.sql
 | `pg` | PostgreSQL 客户端 |
 | `jsonwebtoken` / `bcryptjs` | JWT 认证与密码哈希 |
 | `nodemailer` | SMTP 邮件发送 |
-| `axios` | HTTP 请求，调用 DeepSeek API |
+| `axios` | HTTP 请求，调用 DeepSeek / DashScope OpenAI 兼容 API |
 | `multer` | 文件上传中间件 |
 | `pdf-parse` | PDF 文本提取 |
 | `express-validator` | 请求参数校验 |

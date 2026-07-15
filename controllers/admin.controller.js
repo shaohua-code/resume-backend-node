@@ -9,6 +9,7 @@ const aiCallService = require('../services/admin/admin.aiCall.service');
 const resumeService = require('../services/admin/admin.resume.service');
 const configService = require('../services/admin/admin.config.service');
 const crudService = require('../services/admin/admin.crud.service');
+const aiModelService = require('../services/admin/admin.aiModel.service');
 const feedbackService = require('../services/admin/admin.feedback.service');
 const walletService = require('../services/wallet/wallet.service');
 const ledgerService = require('../services/admin/admin.ledger.service');
@@ -265,6 +266,68 @@ function deleteCrudItem(table, idColumn = 'id') {
       return handleError(res, err);
     }
   };
+}
+
+// ========== AI 模型与任务模型配置（仅 admin:ai_model） ==========
+
+/** 返回模型主数据，供模型管理页展示。 */
+async function listModels(req, res) {
+  try {
+    const items = await aiModelService.listModels();
+    return res.json({ success: true, items });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+/** 创建模型；字段白名单与价格校验由专用 service 处理。 */
+async function createModel(req, res) {
+  try {
+    const data = await aiModelService.createModel(req, req.body);
+    return res.json({ success: true, data, message: '创建成功' });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+/** 更新模型，并保护仍被任务引用的类型与启用状态。 */
+async function updateModel(req, res) {
+  try {
+    const data = await aiModelService.updateModel(req, req.params.id, req.body);
+    return res.json({ success: true, data, message: '更新成功' });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+/** 删除未被任何任务引用的模型。 */
+async function deleteModel(req, res) {
+  try {
+    await aiModelService.deleteModel(req, req.params.id);
+    return res.json({ success: true, message: '删除成功' });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+/** 返回完整任务目录、当前绑定和可选模型。 */
+async function listTaskModels(req, res) {
+  try {
+    const data = await aiModelService.listTaskModels();
+    return res.json({ success: true, ...data });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+/** 切换指定任务的模型，后端强制校验能力类型。 */
+async function updateTaskModel(req, res) {
+  try {
+    const data = await aiModelService.updateTaskModel(req, req.params.taskType, req.body?.model_id);
+    return res.json({ success: true, data, message: '任务模型已更新' });
+  } catch (err) {
+    return handleError(res, err);
+  }
 }
 
 /**
@@ -545,6 +608,12 @@ module.exports = {
   createCrudItem,
   updateCrudItem,
   deleteCrudItem,
+  listModels,
+  createModel,
+  updateModel,
+  deleteModel,
+  listTaskModels,
+  updateTaskModel,
   listFeedbacks,
   getFeedback,
   // 新增导出

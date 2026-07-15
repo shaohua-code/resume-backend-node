@@ -73,6 +73,8 @@ task_type 示例：`resume_generate`, `summary_optimize`, `skills_optimize`, `pr
 | PUT | `/configs/:key` | admin:system_config |
 | GET/POST/PATCH/DELETE | `/announcements` | admin:announcement |
 | GET/POST/PATCH/DELETE | `/models` | admin:ai_model |
+| GET | `/task-models` | admin:ai_model |
+| PUT | `/task-models/:taskType` | admin:ai_model |
 | GET | `/feedbacks` | admin:view_feedback |
 
 调整额度 Body：`{ amount: 20, remark: '活动赠送' }`（负数仅 SUPER_ADMIN）
@@ -89,7 +91,8 @@ task_type 示例：`resume_generate`, `summary_optimize`, `skills_optimize`, `pr
 | ai_call_record | task_type, model, tokens, cost, success |
 | system_config | config_key, config_value(jsonb) — 含 `register_gift_amount` |
 | announcement | title, content, enabled |
-| ai_model | model_key, input/output_price_per_million, enabled |
+| ai_model | model_key, provider, model_type, api_url, api_key_env, input/cached_input/output_price_per_million, enabled |
+| ai_task_model | task_type(unique), required_model_type, model_id |
 | admin_action_log | admin_user_id, action, target_type/id |
 | user_feedback | content_html, content_md |
 
@@ -109,8 +112,16 @@ task_type 示例：`resume_generate`, `summary_optimize`, `skills_optimize`, `pr
 
 1. 调用前 `ensureAiQuota()` → `walletService.ensureSufficientBalance()`
 2. 成功后 `recordAiCall()` 写入 `ai_call_record` 并 `deductForAiCall()`
-3. 费用按 `utils/ai_cost.js` + `ai_model` 表单价计算
+3. 费用按 `utils/ai_cost.js` + `ai_model` 表输入/缓存输入/输出 Token 单价计算
 4. 余额不足：`402` + `code: INSUFFICIENT_BALANCE`
+
+## AI 模型路由
+
+- `deepseek-v4-flash`：`provider=deepseek`、`model_type=text`，默认承担全部文本任务。
+- `qwen3.6-flash`：`provider=dashscope`、`model_type=vision`，默认承担 `jd_image_extract`。
+- 超管在 `/admin/models` 维护模型，在 `/admin/task-models` 为每个任务选择模型。
+- 运行时优先级：`ai_task_model` 后台映射 > 兼容的请求模型参数 > `.env` 回退。
+- 密钥只配置在 `api_key_env` 指向的服务端环境变量中，不保存明文。
 
 ## resume_json（AI 输出）
 

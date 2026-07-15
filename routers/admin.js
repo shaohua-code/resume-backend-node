@@ -54,10 +54,17 @@ router.get('/resumes/:id', requirePermission(PERMISSIONS.ADMIN_VIEW_RESUMES), ad
 router.get('/configs', requirePermission(PERMISSIONS.ADMIN_SYSTEM_CONFIG), adminController.listConfigs)
 router.put('/configs/:key', requirePermission(PERMISSIONS.ADMIN_SYSTEM_CONFIG), adminController.upsertConfig)
 
-// 通用 CRUD：公告/模型
+// AI 模型与任务路由（仅 SUPER_ADMIN 拥有 admin:ai_model）
+router.get('/models', requirePermission(PERMISSIONS.ADMIN_AI_MODEL), adminController.listModels)
+router.post('/models', requirePermission(PERMISSIONS.ADMIN_AI_MODEL), adminController.createModel)
+router.patch('/models/:id', requirePermission(PERMISSIONS.ADMIN_AI_MODEL), adminController.updateModel)
+router.delete('/models/:id', requirePermission(PERMISSIONS.ADMIN_AI_MODEL), adminController.deleteModel)
+router.get('/task-models', requirePermission(PERMISSIONS.ADMIN_AI_MODEL), adminController.listTaskModels)
+router.put('/task-models/:taskType', requirePermission(PERMISSIONS.ADMIN_AI_MODEL), adminController.updateTaskModel)
+
+// 通用 CRUD：公告
 const crudConfigs = [
   { path: '/announcements', table: 'announcement', permission: PERMISSIONS.ADMIN_ANNOUNCEMENT },
-  { path: '/models', table: 'ai_model', permission: PERMISSIONS.ADMIN_AI_MODEL },
 ]
 
 crudConfigs.forEach(({ path, table, permission }) => {

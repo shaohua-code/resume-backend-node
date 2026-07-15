@@ -1,7 +1,7 @@
 ---
 name: resume-backend-node
 description: >-
-  AI简历助手 Node.js 后端项目指南（Express + PostgreSQL + DeepSeek）。
+  AI简历助手 Node.js 后端项目指南（Express + PostgreSQL + 多供应商 OpenAI 兼容模型）。
   在 resume-backend-node 目录编写/修改 API、鉴权、AI 服务、钱包计费、数据库迁移时使用。
   每次进入项目任务先阅读本 skill、reference.md 与前端 skill；改动路由、字段、AI Prompt、
   表结构、权限或配置后须同步更新本 skill、reference.md 与 docs/PRD.md。
@@ -9,7 +9,7 @@ description: >-
 
 # resume-backend-node
 
-AI 简历助手全行业后端。覆盖校招、社招、转岗以及技术、职能、销售、制造、教育、医疗、金融、服务业等岗位。Express 4 + PostgreSQL + JWT + DeepSeek API。**计费模式：账户余额 + AI 按次扣费（已移除 VIP 会员体系）。**
+AI 简历助手全行业后端。覆盖校招、社招、转岗以及技术、职能、销售、制造、教育、医疗、金融、服务业等岗位。Express 4 + PostgreSQL + JWT + OpenAI Chat Completions 兼容 API。**当前 DeepSeek V4 Flash 承担文本任务，Qwen3.6 Flash 承担视觉任务；计费模式为账户余额 + AI Token 扣费。**
 
 ## 何时读取
 
@@ -36,7 +36,7 @@ services/
 middlewares/         # auth | permission
 utils/               # permissions.js | ai_cost.js
 database/
-  init.sql           # 建表（21 张表）
+  init.sql           # 建表（含 ai_model、ai_task_model）
   TABLES.md          # 表中文对照
   ops/               # 运维 SQL
 ```
@@ -78,6 +78,15 @@ database/
 2. 路由定义 `taskType`
 3. `ensureAiQuota()` + `recordAiCall()`（自动扣费）
 4. SSE：`data: ${JSON.stringify({ chunk | done | error })}\n\n`
+
+## 模型类型与任务路由
+
+1. `ai_model` 维护 `provider`、`model_type`、`api_url`、`api_key_env` 和输入/缓存输入/输出 Token 单价；不得把 API Key 明文写入数据库。
+2. 当前类型：`text`（文本模型）与 `vision`（视觉模型）；新类型使用小写标识，并同步前端显示映射。
+3. `ai_task_model` 按唯一 `task_type` 绑定一个模型；`services/ai/ai.model.js` 的 `AI_TASK_CATALOG` 是任务名称和所需模型类型的后端事实来源。
+4. 运行时优先使用后台任务映射，再兼容接口模型参数，最后回退 `.env`；管理端与运行时都必须校验模型类型。
+5. 新供应商必须配置 HTTPS `api_url` 和 `api_key_env`；已内置 `deepseek`、`dashscope` 的环境变量默认值。
+6. 模型/任务配置接口仅授予 `admin:ai_model`，该权限当前仅 SUPER_ADMIN 拥有。
 
 ## AI Prompt 与简历字段约定
 

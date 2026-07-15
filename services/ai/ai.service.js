@@ -1,6 +1,6 @@
 /**
  * AI 服务模块
- * 封装所有与 DeepSeek API 交互的功能：
+ * 封装 OpenAI Chat Completions 兼容模型调用：
  * 1. AI 简历生成
  * 2. AI 项目/个人评价/技能/实习优化
  * 3. JD 岗位匹配
@@ -9,10 +9,9 @@
  */
 
 const axios = require('axios');
-const { settings } = require('../../config');
 const { calcAiCost, normalizeUsage } = require('../../utils/ai_cost');
 const { extractJson } = require('../../utils/extractJson');
-const { AI_TASK, resolveModel } = require('./ai.model');
+const { AI_TASK, resolveModelConfig } = require('./ai.model');
 const {
   RESUME_GENERATE_PROMPT,
   LAZY_GENERATE_PROMPT,
@@ -39,30 +38,40 @@ async function buildMeta(model, usage) {
 }
 
 /**
- * 调用 DeepSeek API 的通用方法（非流式）
- * @returns {Promise<{ content: string, usage: object, model: string, cost: number }>}
+ * 统一校验后台模型记录对应的运行参数，避免请求发出后才暴露配置错误。
  */
-async function callDeepseek(prompt, options = {}) {
-  if (!settings.DEEPSEEK_API_KEY || !settings.DEEPSEEK_API_KEY.trim()) {
-    const err = new Error(
-      'DeepSeek API Key 未配置！请在 .env 文件中设置 DEEPSEEK_API_KEY=你的密钥。' +
-        '获取地址：https://platform.deepseek.com/api_keys',
-    );
+function assertRuntimeConfig(runtime) {
+  if (!runtime.apiKey) {
+    const err = new Error(`${runtime.name} API Key 未配置，请在服务端环境变量 ${runtime.apiKeyEnv || '（未指定）'} 中设置密钥`);
     err.code = 'CONFIG_MISSING';
     throw err;
   }
+  if (!runtime.apiUrl) {
+    const err = new Error(`${runtime.name} API 地址未配置`);
+    err.code = 'CONFIG_MISSING';
+    throw err;
+  }
+}
+
+/**
+ * OpenAI Chat Completions 兼容接口通用方法（历史函数名保留为内部兼容）。
+ * @returns {Promise<{ content: string, usage: object, model: string, cost: number }>}
+ */
+async function callDeepseek(prompt, options = {}) {
+  const runtime = await resolveModelConfig(options.task, options.model);
+  assertRuntimeConfig(runtime);
   const headers = {
-    Authorization: `Bearer ${settings.DEEPSEEK_API_KEY.trim()}`,
+    Authorization: `Bearer ${runtime.apiKey}`,
     'Content-Type': 'application/json',
   };
-  const model = resolveModel(options.task, options.model);
+  const model = runtime.modelKey;
   const payload = {
     model,
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.7,
     max_tokens: 4096,
   };
-  const response = await axios.post(settings.DEEPSEEK_API_URL, payload, {
+  const response = await axios.post(runtime.apiUrl, payload, {
     headers,
     timeout: 60000,
   });
@@ -77,23 +86,17 @@ async function callDeepseek(prompt, options = {}) {
 }
 
 /**
- * 流式调用 DeepSeek API - 通过 onChunk 回调推送增量文本
+ * 流式调用 OpenAI 兼容接口，通过 onChunk 回调推送增量文本。
  * @returns {Promise<{ content: string, usage: object, model: string, cost: number }>}
  */
 async function callDeepseekStream(prompt, options = {}, onChunk) {
-  if (!settings.DEEPSEEK_API_KEY || !settings.DEEPSEEK_API_KEY.trim()) {
-    const err = new Error(
-      'DeepSeek API Key 未配置！请在 .env 文件中设置 DEEPSEEK_API_KEY=你的密钥。' +
-        '获取地址：https://platform.deepseek.com/api_keys',
-    );
-    err.code = 'CONFIG_MISSING';
-    throw err;
-  }
+  const runtime = await resolveModelConfig(options.task, options.model);
+  assertRuntimeConfig(runtime);
   const headers = {
-    Authorization: `Bearer ${settings.DEEPSEEK_API_KEY.trim()}`,
+    Authorization: `Bearer ${runtime.apiKey}`,
     'Content-Type': 'application/json',
   };
-  const model = resolveModel(options.task, options.model);
+  const model = runtime.modelKey;
   const payload = {
     model,
     messages: [{ role: 'user', content: prompt }],
@@ -102,7 +105,7 @@ async function callDeepseekStream(prompt, options = {}, onChunk) {
     stream: true,
     stream_options: { include_usage: true },
   };
-  const response = await axios.post(settings.DEEPSEEK_API_URL, payload, {
+  const response = await axios.post(runtime.apiUrl, payload, {
     headers,
     timeout: 120000,
     responseType: 'stream',
@@ -148,25 +151,18 @@ async function callDeepseekStream(prompt, options = {}, onChunk) {
 
 /**
  * 多模态视觉调用：从图片提取文本（非流式）
-   * 优先使用阿里云 DashScope 视觉模型（Qwen3.6-Flash），降级到 DeepSeek
+ * 视觉任务调用。实际模型与供应商由后台任务映射决定。
  * @param {Buffer} imageBuffer 图片二进制
  * @param {string} mimeType 如 image/jpeg
  */
 async function callDeepseekVision(imageBuffer, mimeType, textPrompt, options = {}) {
-  // 优先 DashScope 视觉模型，降级到 DeepSeek
-  const dashscopeKey = (settings.DASHSCOPE_API_KEY || '').trim();
-  const apiKey = dashscopeKey || (settings.DEEPSEEK_API_KEY || '').trim();
-  const apiUrl = dashscopeKey ? settings.DASHSCOPE_API_URL : settings.DEEPSEEK_API_URL;
-  if (!apiKey) {
-    const err = new Error('视觉模型 API Key 未配置（DASHSCOPE_API_KEY 或 DEEPSEEK_API_KEY）');
-    err.code = 'CONFIG_MISSING';
-    throw err;
-  }
-  const model = resolveModel(options.task, options.model);
+  const runtime = await resolveModelConfig(options.task, options.model);
+  assertRuntimeConfig(runtime);
+  const model = runtime.modelKey;
   const base64 = imageBuffer.toString('base64');
   const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${base64}`;
   const headers = {
-    Authorization: `Bearer ${apiKey}`,
+    Authorization: `Bearer ${runtime.apiKey}`,
     'Content-Type': 'application/json',
   };
   const payload = {
@@ -181,7 +177,7 @@ async function callDeepseekVision(imageBuffer, mimeType, textPrompt, options = {
     temperature: 0.3,
     max_tokens: 4096,
   };
-  const response = await axios.post(apiUrl, payload, {
+  const response = await axios.post(runtime.apiUrl, payload, {
     headers,
     timeout: 90000,
   });
