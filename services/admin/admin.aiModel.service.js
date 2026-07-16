@@ -4,7 +4,7 @@
  */
 
 const { dbAdmin } = require('../../dbClient');
-const { AI_TASK_CATALOG } = require('../ai/ai.model');
+const { AI_TASK_CATALOG, getModelPriceBaseline } = require('../ai/ai.model');
 const { logAdminAction, sanitizeKeyword } = require('./admin.common.service');
 
 const MODEL_FIELDS = [
@@ -99,17 +99,20 @@ async function adjustModelRates(req, body = {}) {
 
   const { data: models, error } = await dbAdmin
     .from('ai_model')
-    .select('id,input_price_per_million,cached_input_price_per_million,output_price_per_million');
+    .select('*');
   if (error) throw Object.assign(new Error(`查询模型失败：${error.message}`), { statusCode: 500 });
 
   const now = new Date().toISOString();
-  const payloads = (models || []).map((model) => ({
-    id: model.id,
-    input_price_per_million: normalizePriceValue(Number(model.input_price_per_million || 0) * multiplier),
-    cached_input_price_per_million: normalizePriceValue(Number(model.cached_input_price_per_million || 0) * multiplier),
-    output_price_per_million: normalizePriceValue(Number(model.output_price_per_million || 0) * multiplier),
-    update_time: now,
-  }));
+  const payloads = (models || []).map((model) => {
+    const baseline = getModelPriceBaseline(model);
+    return {
+      id: model.id,
+      input_price_per_million: normalizePriceValue(baseline.input_price_per_million * multiplier),
+      cached_input_price_per_million: normalizePriceValue(baseline.cached_input_price_per_million * multiplier),
+      output_price_per_million: normalizePriceValue(baseline.output_price_per_million * multiplier),
+      update_time: now,
+    };
+  });
   const updates = payloads.map(({ id, ...payload }) => dbAdmin
     .from('ai_model')
     .update(payload)
@@ -126,9 +129,14 @@ async function adjustModelRates(req, body = {}) {
 async function createModel(req, body) {
   const now = new Date().toISOString();
   const payload = normalizeModelPayload(body);
+  const officialPrices = {
+    official_input_price_per_million: payload.input_price_per_million || 0,
+    official_cached_input_price_per_million: payload.cached_input_price_per_million || 0,
+    official_output_price_per_million: payload.output_price_per_million || 0,
+  };
   const { data, error } = await dbAdmin
     .from('ai_model')
-    .insert({ ...payload, task_type: 'all', create_time: now, update_time: now })
+    .insert({ ...payload, ...officialPrices, task_type: 'all', create_time: now, update_time: now })
     .select()
     .single();
   if (error) throw Object.assign(new Error(`创建模型失败：${error.message}`), { statusCode: 400 });
@@ -139,6 +147,13 @@ async function createModel(req, body) {
 async function updateModel(req, id, body) {
   const payload = normalizeModelPayload(body, true);
   if (!Object.keys(payload).length) throw badRequest('没有可更新的模型字段');
+
+  // 后台手动修改单价时，将填写值视为新的官方基准价。
+  for (const field of PRICE_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(payload, field)) {
+      payload[`official_${field}`] = payload[field];
+    }
+  }
 
   // 已分配模型不能停用或改成不兼容类型，避免线上任务在保存后立即失效。
   if (payload.enabled === false || payload.model_type) {

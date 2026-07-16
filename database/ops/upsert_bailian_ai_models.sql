@@ -12,6 +12,11 @@
 
 BEGIN;
 
+ALTER TABLE public.ai_model
+  ADD COLUMN IF NOT EXISTS official_input_price_per_million NUMERIC(10, 4) DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS official_cached_input_price_per_million NUMERIC(10, 4) DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS official_output_price_per_million NUMERIC(10, 4) DEFAULT 0;
+
 -- Full reset: remove all task assignments first because ai_task_model references
 -- ai_model. ai_call_record stores model names as text and is not affected.
 DELETE FROM public.ai_task_model;
@@ -64,6 +69,21 @@ VALUES
   ('QVQ Max', 'qvq-max', 'all', 'dashscope', 'vision', '', 'DASHSCOPE_API_KEY', 8.0000, 8.0000, 32.0000, true, true, now()),
   ('QVQ Plus', 'qvq-plus', 'all', 'dashscope', 'vision', '', 'DASHSCOPE_API_KEY', 2.0000, 2.0000, 5.0000, true, true, now())
 ON CONFLICT (model_key) DO NOTHING;
+
+-- Preserve the official prices as immutable baselines, then derive the sale price.
+-- Change only 2.0000 below when a different global multiplier is needed.
+UPDATE public.ai_model
+SET
+  official_input_price_per_million = input_price_per_million,
+  official_cached_input_price_per_million = cached_input_price_per_million,
+  official_output_price_per_million = output_price_per_million;
+
+UPDATE public.ai_model
+SET
+  input_price_per_million = ROUND(official_input_price_per_million * 2.0000, 4),
+  cached_input_price_per_million = ROUND(official_cached_input_price_per_million * 2.0000, 4),
+  output_price_per_million = ROUND(official_output_price_per_million * 2.0000, 4),
+  update_time = now();
 
 -- Defaults for this resume app:
 -- text: glm-5.2 is selected as the default strong multi-vendor text model.

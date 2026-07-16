@@ -45,6 +45,24 @@ function getTaskDefinition(task) {
   return AI_TASK_CATALOG.find((item) => item.task_type === task) || null;
 }
 
+/**
+ * 获取模型的官方基准价。旧库尚未补充 official_* 字段时回退到当前价，
+ * 便于数据库迁移与后端发布分步进行。
+ */
+function getModelPriceBaseline(model = {}) {
+  return {
+    input_price_per_million: Number(
+      model.official_input_price_per_million ?? model.input_price_per_million,
+    ) || 0,
+    cached_input_price_per_million: Number(
+      model.official_cached_input_price_per_million ?? model.cached_input_price_per_million,
+    ) || 0,
+    output_price_per_million: Number(
+      model.official_output_price_per_million ?? model.output_price_per_million,
+    ) || 0,
+  };
+}
+
 function getProviderDefaults(provider) {
   if (provider === 'dashscope') {
     return {
@@ -181,6 +199,7 @@ module.exports = {
   AI_TASK_CATALOG,
   AI_MODEL_TYPE,
   getTaskDefinition,
+  getModelPriceBaseline,
   resolveModel,
   resolveModelConfig,
 };
