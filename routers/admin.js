@@ -57,6 +57,7 @@ router.put('/configs/:key', requirePermission(PERMISSIONS.ADMIN_SYSTEM_CONFIG), 
 // AI 模型与任务路由（仅 SUPER_ADMIN 拥有 admin:ai_model）
 router.get('/models', requirePermission(PERMISSIONS.ADMIN_AI_MODEL), adminController.listModels)
 router.post('/models', requirePermission(PERMISSIONS.ADMIN_AI_MODEL), adminController.createModel)
+router.patch('/models/rate-multiplier', requirePermission(PERMISSIONS.ADMIN_AI_MODEL), adminController.adjustModelRates)
 router.patch('/models/:id', requirePermission(PERMISSIONS.ADMIN_AI_MODEL), adminController.updateModel)
 router.delete('/models/:id', requirePermission(PERMISSIONS.ADMIN_AI_MODEL), adminController.deleteModel)
 router.get('/task-models', requirePermission(PERMISSIONS.ADMIN_AI_MODEL), adminController.listTaskModels)

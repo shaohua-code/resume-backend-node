@@ -5,7 +5,7 @@
 
 const { dbAdmin } = require('../../dbClient');
 const { AI_TASK_CATALOG } = require('../ai/ai.model');
-const { logAdminAction } = require('./admin.common.service');
+const { logAdminAction, sanitizeKeyword } = require('./admin.common.service');
 
 const MODEL_FIELDS = [
   'name',
@@ -23,6 +23,17 @@ const MODEL_FIELDS = [
 
 function badRequest(message) {
   return Object.assign(new Error(message), { statusCode: 400 });
+}
+
+const PRICE_SCALE = 4;
+const MAX_MODEL_PRICE = 999999.9999;
+const PRICE_FIELDS = ['input_price_per_million', 'cached_input_price_per_million', 'output_price_per_million'];
+
+function normalizePriceValue(value) {
+  const normalized = Number(Number(value || 0).toFixed(PRICE_SCALE));
+  if (!Number.isFinite(normalized) || normalized < 0) throw badRequest('模型单价必须是大于等于 0 的数字');
+  if (normalized > MAX_MODEL_PRICE) throw badRequest(`调整后的模型单价不能超过 ${MAX_MODEL_PRICE}`);
+  return normalized;
 }
 
 function normalizeModelPayload(body = {}, partial = false) {
@@ -56,11 +67,9 @@ function normalizeModelPayload(body = {}, partial = false) {
     throw badRequest('密钥环境变量名格式不正确');
   }
 
-  for (const field of ['input_price_per_million', 'cached_input_price_per_million', 'output_price_per_million']) {
+  for (const field of PRICE_FIELDS) {
     if (Object.prototype.hasOwnProperty.call(payload, field)) {
-      const value = Number(payload[field]);
-      if (!Number.isFinite(value) || value < 0) throw badRequest('模型单价必须是大于等于 0 的数字');
-      payload[field] = value;
+      payload[field] = normalizePriceValue(payload[field]);
     }
   }
   // thinking_enabled is nullable: null = provider default, true/false = force request parameter.
@@ -73,10 +82,45 @@ function normalizeModelPayload(body = {}, partial = false) {
   return payload;
 }
 
-async function listModels() {
-  const { data, error } = await dbAdmin.from('ai_model').select('*').order('create_time', { ascending: false });
+async function listModels(filters = {}) {
+  let query = dbAdmin.from('ai_model').select('*').order('create_time', { ascending: false });
+  const name = sanitizeKeyword(filters.name);
+  const modelType = String(filters.model_type || '').trim().toLowerCase();
+  if (name) query = query.or(`name.ilike.%${name}%,model_key.ilike.%${name}%`);
+  if (modelType && modelType !== 'all') query = query.eq('model_type', modelType);
+  const { data, error } = await query;
   if (error) throw Object.assign(new Error(`查询模型失败：${error.message}`), { statusCode: 500 });
   return data || [];
+}
+
+async function adjustModelRates(req, body = {}) {
+  const multiplier = Number(body.multiplier);
+  if (!Number.isFinite(multiplier) || multiplier <= 0) throw badRequest('倍率必须是大于 0 的数字');
+
+  const { data: models, error } = await dbAdmin
+    .from('ai_model')
+    .select('id,input_price_per_million,cached_input_price_per_million,output_price_per_million');
+  if (error) throw Object.assign(new Error(`查询模型失败：${error.message}`), { statusCode: 500 });
+
+  const now = new Date().toISOString();
+  const payloads = (models || []).map((model) => ({
+    id: model.id,
+    input_price_per_million: normalizePriceValue(Number(model.input_price_per_million || 0) * multiplier),
+    cached_input_price_per_million: normalizePriceValue(Number(model.cached_input_price_per_million || 0) * multiplier),
+    output_price_per_million: normalizePriceValue(Number(model.output_price_per_million || 0) * multiplier),
+    update_time: now,
+  }));
+  const updates = payloads.map(({ id, ...payload }) => dbAdmin
+    .from('ai_model')
+    .update(payload)
+    .eq('id', id));
+
+  const results = await Promise.all(updates);
+  const failed = results.find((result) => result.error);
+  if (failed) throw Object.assign(new Error(`调整模型倍率失败：${failed.error.message}`), { statusCode: 400 });
+
+  await logAdminAction(req, 'adjust_ai_model_rates', 'ai_model', null, { multiplier, count: updates.length });
+  return { multiplier, count: updates.length };
 }
 
 async function createModel(req, body) {
@@ -189,6 +233,7 @@ async function updateTaskModel(req, taskType, modelId) {
 
 module.exports = {
   listModels,
+  adjustModelRates,
   createModel,
   updateModel,
   deleteModel,

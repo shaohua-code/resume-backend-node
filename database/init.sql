@@ -325,10 +325,16 @@ INSERT INTO public.ai_model (
   input_price_per_million, cached_input_price_per_million, output_price_per_million, thinking_enabled, enabled
 )
 VALUES
-  ('DeepSeek V4 Flash', 'deepseek-v4-flash', 'all', 'deepseek', 'text', 'DEEPSEEK_API_KEY', 1.0, 0.02, 2.0, NULL, true),
-  ('DeepSeek Chat（兼容别名，即将下线）', 'deepseek-chat', 'all', 'deepseek', 'text', 'DEEPSEEK_API_KEY', 1.0, 0.02, 2.0, NULL, false),
-  ('Qwen3.6 Flash 视觉模型', 'qwen3.6-flash', 'all', 'dashscope', 'vision', 'DASHSCOPE_API_KEY', 1.2, 0.24, 7.2, NULL, true)
-ON CONFLICT (model_key) DO NOTHING;
+  ('DeepSeek V4 Flash', 'deepseek-v4-flash', 'all', 'deepseek', 'text', 'DEEPSEEK_API_KEY', 1.0, 0.1, 2.0, NULL, true),
+  ('DeepSeek Chat (legacy alias)', 'deepseek-chat', 'all', 'deepseek', 'text', 'DEEPSEEK_API_KEY', 1.0, 0.1, 2.0, NULL, false),
+  ('Qwen3.6 Flash Vision', 'qwen3.6-flash', 'all', 'dashscope', 'vision', 'DASHSCOPE_API_KEY', 1.2, 0.12, 7.2, false, true)
+ON CONFLICT (model_key) DO UPDATE SET
+  input_price_per_million = EXCLUDED.input_price_per_million,
+  cached_input_price_per_million = EXCLUDED.cached_input_price_per_million,
+  output_price_per_million = EXCLUDED.output_price_per_million,
+  thinking_enabled = EXCLUDED.thinking_enabled,
+  enabled = EXCLUDED.enabled,
+  update_time = now();
 
 INSERT INTO public.ai_task_model (task_type, required_model_type, model_id)
 SELECT task.task_type, task.required_model_type, model.id

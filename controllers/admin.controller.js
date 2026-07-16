@@ -273,8 +273,18 @@ function deleteCrudItem(table, idColumn = 'id') {
 /** 返回模型主数据，供模型管理页展示。 */
 async function listModels(req, res) {
   try {
-    const items = await aiModelService.listModels();
+    const items = await aiModelService.listModels(req.query || {});
     return res.json({ success: true, items });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+/** 一键按倍率调整所有模型的 Token 单价。*/
+async function adjustModelRates(req, res) {
+  try {
+    const data = await aiModelService.adjustModelRates(req, req.body || {});
+    return res.json({ success: true, data, message: '模型倍率已调整' });
   } catch (err) {
     return handleError(res, err);
   }
@@ -609,6 +619,7 @@ module.exports = {
   updateCrudItem,
   deleteCrudItem,
   listModels,
+  adjustModelRates,
   createModel,
   updateModel,
   deleteModel,
