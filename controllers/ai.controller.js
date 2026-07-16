@@ -195,8 +195,8 @@ async function optimizeByJdStream(req, res) {
  */
 async function extractJdImage(req, res) {
   const taskType = 'jd_image_extract';
-  const model = getRequestedModel(req);
   jdImageUpload.single('file')(req, res, async (uploadErr) => {
+    const model = getRequestedModel(req);
     if (uploadErr) {
       return error(res, 400, uploadErr.message || '图片上传失败');
     }
@@ -222,6 +222,50 @@ async function extractJdImage(req, res) {
       await recordAiCall(req, taskType, model, false, e.message);
       console.error('[extractJdImage] error:', e);
       return error(res, e.statusCode || 500, `提取失败：${e.message}`);
+    }
+  });
+}
+
+/**
+ * 从 JD 图片中流式提取岗位描述文本（OCR / 视觉模型）
+ * POST /api/ai/extract-jd-image/stream
+ */
+async function extractJdImageStream(req, res) {
+  const taskType = 'jd_image_extract';
+  jdImageUpload.single('file')(req, res, async (uploadErr) => {
+    const model = getRequestedModel(req);
+    if (uploadErr) {
+      return error(res, 400, uploadErr.message || '图片上传失败');
+    }
+    if (!req.file || !req.file.buffer) {
+      return error(res, 400, '请上传 JD 图片（字段名：file）');
+    }
+
+    const sendEvent = setupSSE(res);
+    try {
+      await ensureAiQuota(req, taskType);
+      const { data, meta } = await aiService.extractJdFromImageStream(
+        req.file.buffer,
+        req.file.mimetype,
+        { model },
+        (chunk) => {
+          sendEvent({ chunk });
+        },
+      );
+      if (!data?.jd_text) {
+        await recordAiCall(req, taskType, model, false, '未能从图片中提取 JD 内容');
+        sendEvent({ error: '未能从图片中提取 JD 内容，请换一张更清晰的图片或改用文本粘贴' });
+        return res.end();
+      }
+      await recordAiCall(req, taskType, model, true, '', meta);
+      sendEvent({ done: true, data });
+      return res.end();
+    } catch (e) {
+      console.error('[extractJdImageStream] error:', e);
+      return respondAiError(res, e, {
+        sendEvent,
+        recordFn: (msg) => recordAiCall(req, taskType, model, false, msg),
+      });
     }
   });
 }
@@ -370,6 +414,7 @@ module.exports = {
   optimize,
   optimizeByJdStream,
   extractJdImage,
+  extractJdImageStream,
   optimizeStream,
   matchJd,
   score,

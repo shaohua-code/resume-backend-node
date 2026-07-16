@@ -622,6 +622,80 @@ async function scoreResume(resumeContent, options = {}) {
   };
 }
 
+/**
+ * 多模态视觉流式调用：从图片提取文本并通过 onChunk 推送增量文本。
+ * @param {Buffer} imageBuffer 图片二进制
+ * @param {string} mimeType 如 image/jpeg
+ */
+async function callDeepseekVisionStream(imageBuffer, mimeType, textPrompt, options = {}, onChunk) {
+  const runtime = await resolveModelConfig(options.task, options.model);
+  assertRuntimeConfig(runtime);
+  const model = runtime.modelKey;
+  const base64 = imageBuffer.toString('base64');
+  const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${base64}`;
+  const headers = {
+    Authorization: `Bearer ${runtime.apiKey}`,
+    'Content-Type': 'application/json',
+  };
+  const payload = {
+    model,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'text', text: textPrompt },
+        { type: 'image_url', image_url: { url: dataUrl } },
+      ],
+    }],
+    temperature: 0.3,
+    max_tokens: 4096,
+    stream: true,
+    stream_options: { include_usage: true },
+  };
+  applyRuntimeOptions(payload, runtime);
+  const response = await axios.post(runtime.apiUrl, payload, {
+    headers,
+    timeout: 120000,
+    responseType: 'stream',
+  });
+
+  return new Promise((resolve, reject) => {
+    let full = '';
+    let remainder = '';
+    let usage = {};
+
+    response.data.on('data', (chunk) => {
+      remainder += chunk.toString();
+      const lines = remainder.split('\n');
+      remainder = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const data = trimmed.slice(5).trim();
+        if (data === '[DONE]') continue;
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.usage) {
+            usage = parsed.usage;
+          }
+          const content = parsed.choices?.[0]?.delta?.content || '';
+          if (content) {
+            full += content;
+            if (typeof onChunk === 'function') onChunk(content, full);
+          }
+        } catch (e) {
+          /* ignore partial json */
+        }
+      }
+    });
+
+    response.data.on('end', async () => {
+      const meta = await buildMeta(model, usage);
+      resolve({ content: full, ...meta });
+    });
+    response.data.on('error', reject);
+  });
+}
+
 function parseScorePayload(content) {
   const jsonMatch = String(content || '').match(/<SCORE_JSON>([\s\S]*?)<\/SCORE_JSON>/i);
   const parsed = jsonMatch ? extractJson(jsonMatch[1]) : extractJson(content);
@@ -712,6 +786,24 @@ async function extractJdFromImage(imageBuffer, mimeType = 'image/jpeg', options 
     mimeType,
     JD_IMAGE_EXTRACT_PROMPT,
     { task: AI_TASK.JD_IMAGE_EXTRACT, model: options.model },
+  );
+  const jdText = String(content || '').trim();
+  return {
+    data: { jd_text: jdText },
+    meta: { model, usage, cost },
+  };
+}
+
+/**
+ * 从 JD 图片中流式提取岗位描述文本（OCR/视觉模型）
+ */
+async function extractJdFromImageStream(imageBuffer, mimeType = 'image/jpeg', options = {}, onChunk) {
+  const { content, usage, model, cost } = await callDeepseekVisionStream(
+    imageBuffer,
+    mimeType,
+    JD_IMAGE_EXTRACT_PROMPT,
+    { task: AI_TASK.JD_IMAGE_EXTRACT, model: options.model },
+    onChunk,
   );
   const jdText = String(content || '').trim();
   return {
@@ -825,4 +917,5 @@ module.exports = {
   optimizePdfByJdStream,
   optimizeResumeByJdStream,
   extractJdFromImage,
+  extractJdFromImageStream,
 };

@@ -48,6 +48,13 @@ router.post('/optimize-by-jd/stream', aiValidator.optimizeByJdStream, validate, 
 router.post('/extract-jd-image', aiController.extractJdImage)
 
 /**
+ * 从 JD 图片流式提取岗位描述文本
+ * POST /api/ai/extract-jd-image/stream
+ * multipart: file (image, ≤10MB)
+ */
+router.post('/extract-jd-image/stream', aiController.extractJdImageStream)
+
+/**
  * 分模块 AI 流式优化
  * POST /api/ai/optimize/:type/stream
  * type 可选：summary（个人评价）、skills（技能特长）、project（项目经历）、internship（实习经历）、work_experience（工作经历）
