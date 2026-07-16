@@ -486,6 +486,7 @@ async function generateResumeStream(userInput, options = {}, onChunk) {
 async function optimizeProject(projectDescription, targetPosition = '', options = {}) {
   const prompt = format(OPTIMIZE_PROJECT_PROMPT, {
     project_description: projectDescription,
+    project_record: JSON.stringify({ description: projectDescription || '' }),
     target_position: targetPosition || '通用职业方向',
     resume_context: '',
   });
@@ -499,6 +500,7 @@ async function optimizeProject(projectDescription, targetPosition = '', options 
 async function optimizeProjectStream(project, resume, targetPosition = '', options = {}, onChunk) {
   const prompt = format(OPTIMIZE_PROJECT_PROMPT, {
     project_description: project.description || '',
+    project_record: JSON.stringify(project || {}),
     target_position: targetPosition || '通用职业方向',
     resume_context: buildResumeContext(resume),
   });
@@ -549,6 +551,7 @@ async function optimizeSkillsStream(resume, targetPosition = '', options = {}, o
 async function optimizeInternshipStream(internship, resume, targetPosition = '', options = {}, onChunk) {
   const prompt = format(OPTIMIZE_INTERNSHIP_PROMPT, {
     internship_description: internship.description || '',
+    internship_record: JSON.stringify(internship || {}),
     target_position: targetPosition || '通用职业方向',
     resume_context: buildResumeContext(resume),
   });
@@ -573,6 +576,7 @@ async function optimizeWorkExperienceStream(workExp, resume, targetPosition = ''
   // 使用工作经历专用 Prompt（区别于实习，强调职业深度和业务价值）
   const prompt = format(OPTIMIZE_WORK_EXPERIENCE_PROMPT, {
     work_experience_description: workExp.description || '',
+    work_experience_record: JSON.stringify(workExp || {}),
     target_position: targetPosition || '通用职业方向',
     resume_context: buildResumeContext(resume),
   });
