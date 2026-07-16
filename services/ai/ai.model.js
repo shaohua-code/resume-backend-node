@@ -37,7 +37,7 @@ const AI_TASK_CATALOG = [
   { task_type: AI_TASK.SCORE, name: '简历评分', required_model_type: AI_MODEL_TYPE.TEXT },
   { task_type: AI_TASK.PDF_OPTIMIZE, name: 'PDF 简历优化', required_model_type: AI_MODEL_TYPE.TEXT },
   { task_type: AI_TASK.JD_RESUME_OPTIMIZE, name: 'JD 简历优化', required_model_type: AI_MODEL_TYPE.TEXT },
-  { task_type: AI_TASK.PDF_JD_OPTIMIZE, name: 'PDF + JD 优化', required_model_type: AI_MODEL_TYPE.TEXT },
+  { task_type: AI_TASK.PDF_JD_OPTIMIZE, name: 'PDF + 岗位优化', required_model_type: AI_MODEL_TYPE.TEXT },
   { task_type: AI_TASK.JD_IMAGE_EXTRACT, name: 'JD 图片识别', required_model_type: AI_MODEL_TYPE.VISION },
 ];
 

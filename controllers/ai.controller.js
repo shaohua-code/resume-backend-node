@@ -1,6 +1,6 @@
 /**
  * AI 控制器
- * 处理所有 AI 相关接口：简历生成、各类优化、JD 匹配、简历评分
+ * 处理所有 AI 相关接口：简历生成、各类优化、岗位匹配分析、简历评分
  */
 
 const aiService = require('../services/ai/ai.service');

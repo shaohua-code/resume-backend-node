@@ -1,7 +1,7 @@
 /**
  * AI 路由模块
  * 挂载路径前缀：/api/ai
- * 职责：AI 简历生成、分模块优化、JD 匹配、简历评分
+ * 职责：AI 简历生成、分模块优化、岗位匹配分析、简历评分
  */
 
 const express = require('express')

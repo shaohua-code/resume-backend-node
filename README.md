@@ -70,7 +70,7 @@ resume-backend-node/
 | 前缀 | 路由文件 | 职责 |
 |---|---|---|
 | `/api/auth` | `routers/auth.js` | 登录、验证码、token 刷新、密码重置 |
-| `/api/ai` | `routers/ai.js` | AI 生成、分模块优化、JD 匹配、简历评分 |
+| `/api/ai` | `routers/ai.js` | AI 生成、分模块优化、岗位匹配分析、简历评分 |
 | `/api/pdf` | `routers/pdf.js` | PDF 上传、解析、AI 整体优化、文件管理 |
 | `/api/resume` | `routers/resume.js` | 简历 CRUD、导出记录 |
 | `/api/wallet` | `routers/wallet.js` | 用户余额与流水 |

@@ -148,7 +148,7 @@ async function uploadOptimizeByJdStream(req, res) {
     const filePath = req.file.path;
     try {
       await ensureAiQuota(req, taskType);
-      sendEvent({ status: 'PDF 解析完成，AI 正在根据岗位 JD 优化...' });
+      sendEvent({ status: 'PDF 解析完成，AI 正在根据岗位 岗位优化...' });
       const { data, meta } = await parseAndOptimizeByJd(filePath, jdText, model, (chunk) => {
         sendEvent({ chunk });
       });
@@ -285,7 +285,7 @@ async function existingOptimizeByJdStream(req, res) {
   }
   try {
     await ensureAiQuota(req, taskType);
-    sendEvent({ status: '读取已上传简历，AI 正在根据岗位 JD 优化...' });
+    sendEvent({ status: '读取已上传简历，AI 正在根据岗位 岗位优化...' });
     const { data, meta } = await parseAndOptimizeByJd(filePath, jdText, model, (chunk) => {
       sendEvent({ chunk });
     });

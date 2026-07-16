@@ -41,7 +41,7 @@ const optimizeByJdStream = [
 ]
 
 /**
- * JD 匹配参数校验
+ * 岗位匹配分析参数校验
  */
 const matchJd = [
   body('resume_id').notEmpty().withMessage('resume_id 不能为空'),
