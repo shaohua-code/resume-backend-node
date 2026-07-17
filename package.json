@@ -1,7 +1,7 @@
 {
   "name": "resume-backend-node",
   "version": "1.0.0",
-  "description": "全行业 AI 简历助手后端 API - Node.js + PostgreSQL 版本",
+  "description": "全行业 AI 简历后端 API - Node.js + PostgreSQL 版本",
   "main": "main.js",
   "type": "commonjs",
   "scripts": {

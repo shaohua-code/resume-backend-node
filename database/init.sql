@@ -1,5 +1,5 @@
 -- ============================================================
--- AI 简历助手 - 宝塔 PostgreSQL 完整建库脚本
+-- AI 简历 - 宝塔 PostgreSQL 完整建库脚本
 -- 数据库：ai-resume @ 175.178.62.55
 -- 执行环境：宝塔面板 → 数据库 → PostgreSQL → SQL 执行
 -- 幂等：可重复执行（IF NOT EXISTS / ON CONFLICT）
@@ -319,8 +319,8 @@ VALUES
   ('ai_daily_limit', '{"USER": 3}'::jsonb, '普通用户每日每类AI调用次数'),
   ('register_gift_amount', '{"amount": 10}'::jsonb, '新用户注册赠送额度（元）'),
   ('super_admin_total_quota', '{"amount": 1000000}'::jsonb, '超级管理员初始总额度池（元）'),
-  ('recharge_email_admin_notify', '{"subject":"【AI简历助手】用户提交了充值凭证","html":"","text":""}'::jsonb, '用户提交充值凭证后通知管理员的邮件模板'),
-  ('recharge_email_user_confirm', '{"subject":"【AI简历助手】充值已到账","html":"","text":""}'::jsonb, '管理员确认充值后通知用户的邮件模板')
+  ('recharge_email_admin_notify', '{"subject":"【AI简历】用户提交了充值凭证","html":"","text":""}'::jsonb, '用户提交充值凭证后通知管理员的邮件模板'),
+  ('recharge_email_user_confirm', '{"subject":"【AI简历】充值已到账","html":"","text":""}'::jsonb, '管理员确认充值后通知用户的邮件模板')
 ON CONFLICT (config_key) DO NOTHING;
 
 INSERT INTO public.ai_model (

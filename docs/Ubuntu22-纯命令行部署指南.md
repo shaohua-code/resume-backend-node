@@ -1,4 +1,4 @@
-# AI 简历助手 — Ubuntu 22 纯命令行部署指南（无宝塔）
+# AI 简历 — Ubuntu 22 纯命令行部署指南（无宝塔）
 
 > 适用：全新 Ubuntu 22.04 云服务器，全程 SSH + 命令行，不依赖宝塔面板  
 > 技术栈：PostgreSQL + Node.js + PM2 + Nginx + JWT + 邮箱验证码

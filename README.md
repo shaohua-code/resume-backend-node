@@ -1,4 +1,4 @@
-# AI 简历助手后端服务
+# AI 简历后端服务
 
 基于 **Node.js + Express + PostgreSQL + JWT** 的全行业简历 AI 后端 API，当前使用 DeepSeek V4 Flash 处理文本任务、Qwen3.6 Flash 处理视觉任务，并支持由超级管理员按任务切换 OpenAI 兼容模型。
 
@@ -205,3 +205,5 @@ psql -h 127.0.0.1 -U ai_resume -d ai_resume -f database/init.sql
 - 所有导出函数均添加中文 JSDoc 注释。
 - AI 调用统一经过 `services/ai/ai.quota.service.js` 校验余额并在成功后扣费、记录审计日志。
 - 新用户注册在 `user_profile_service.js` 中自动初始化钱包并写入 `REGISTER_GIFT` 流水。
+
+提交代码前阅读 [`CONTRIBUTING.md`](CONTRIBUTING.md)。输入 `--提交` 时，项目的 `commit-ai-resume` Skill 会审查当前差异、运行必要验证，并按规范创建本地提交；不会自动推送。

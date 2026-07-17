@@ -18,6 +18,6 @@ CREATE INDEX IF NOT EXISTS idx_recharge_request_user ON public.recharge_request(
 
 INSERT INTO public.system_config (config_key, config_value, description)
 VALUES
-  ('recharge_email_admin_notify', '{"subject":"【AI简历助手】用户提交了充值凭证","html":"","text":""}'::jsonb, '用户提交充值凭证后通知管理员的邮件模板'),
-  ('recharge_email_user_confirm', '{"subject":"【AI简历助手】充值已到账","html":"","text":""}'::jsonb, '管理员确认充值后通知用户的邮件模板')
+  ('recharge_email_admin_notify', '{"subject":"【AI简历】用户提交了充值凭证","html":"","text":""}'::jsonb, '用户提交充值凭证后通知管理员的邮件模板'),
+  ('recharge_email_user_confirm', '{"subject":"【AI简历】充值已到账","html":"","text":""}'::jsonb, '管理员确认充值后通知用户的邮件模板')
 ON CONFLICT (config_key) DO NOTHING;
