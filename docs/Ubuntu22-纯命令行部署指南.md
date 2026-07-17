@@ -573,23 +573,9 @@ ON CONFLICT (user_id) DO UPDATE SET balance = 1000000, update_time = now();
 
 重新登录后应能进入管理后台。
 
-### 11.3 初始化用户额度
+### 11.3 数据库脚本边界
 
-重置所有 USER 余额为注册赠送额（默认 10 元），并重建超管额度池（100 万）：
-
-```bash
-psql -h 127.0.0.1 -U ai_resume -d ai_resume -f /var/www/resume-backend-node/database/ops/init_all_user_quota.sql
-```
-
-### 11.4 清除所有用户（可选，不可逆）
-
-如需清空全部账号后重新注册：
-
-```bash
-psql -h 127.0.0.1 -U ai_resume -d ai_resume -f /var/www/resume-backend-node/database/ops/clear_all_users.sql
-```
-
-执行后需重新完成 §11.1 注册与 §11.2 超管 SQL。密码登录时服务端日志会输出 `[登录调试]`（含原始密码与加密 hash），便于排查认证问题。
+项目只保留 `database/init.sql` 作为全新数据库的结构初始化脚本。生产数据调整、清空、重置或升级不使用仓库内预置 SQL；执行前应针对目标环境单独评审、备份并获得明确授权。
 
 ---
 

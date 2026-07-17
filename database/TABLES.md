@@ -249,13 +249,11 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 
 ---
 
-## 运维脚本
+## 数据库脚本
 
 | 脚本 | 用途 |
 |---|---|
-| [`ops/init_all_user_quota.sql`](ops/init_all_user_quota.sql) | 初始化所有 USER 余额与超管额度池（幂等） |
-| [`ops/clear_all_users.sql`](ops/clear_all_users.sql) | 清除所有用户及关联数据（不可逆） |
-| [`ops/reset_quota_and_users.sql`](ops/reset_quota_and_users.sql) | 旧版额度重置（已迁移至 init_all_user_quota.sql） |
+| [`init.sql`](init.sql) | 唯一数据库结构初始化脚本；不保留额外迁移、重置或清理 SQL |
 
 ---
 

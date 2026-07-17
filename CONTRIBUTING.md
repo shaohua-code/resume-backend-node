@@ -8,7 +8,7 @@
 2. 确认新增或改写的 JavaScript、SQL 与配置逻辑有说明用途、约束或原因的邻近中文注释。
 3. 对修改的 `.js` 文件运行 `node --check`；影响范围广时运行项目快照的 `-Check full`。
 4. 接口、权限、AI 任务、数据库、计费或跨层行为变化时运行项目契约检查。
-5. 数据库结构变化必须同时审查 `database/init.sql` 和幂等 `database/ops/` 迁移；提交检查不得连接生产数据库。
+5. 数据库结构变化只更新并审查唯一脚本 `database/init.sql` 与 `database/TABLES.md`；提交检查不得连接生产数据库，也不得新增迁移、重置或清理 SQL。
 6. 运行 `git diff --check` 与 `git diff --cached --check`，修复空白错误后再提交。
 
 ## 提交信息
@@ -33,7 +33,7 @@
 ```text
 feat(ai): 增加视觉任务模型路由
 fix(wallet): 防止充值申请重复审批
-docs(database): 补充迁移提交检查规则
+docs(database): 补充初始化脚本检查规则
 ```
 
 破坏性变化使用 `type(scope)!:`，并在正文中增加 `BREAKING CHANGE:` 说明。

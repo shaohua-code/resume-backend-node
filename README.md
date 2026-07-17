@@ -20,11 +20,11 @@ resume-backend-node/
 ├── app.js                  # Express 应用工厂：中间件、路由挂载
 ├── main.js                 # 服务启动入口
 ├── config.js               # 环境变量与全局配置
-├── dbClient.js             # PostgreSQL 数据库客户端（dbAdmin）
 ├── lib/
 │   ├── db.js               # pg 连接池
 │   ├── pgCompat.js         # 链式查询兼容层
 │   └── uploadPaths.js      # 上传目录路径管理
+├── dbClient.js             # PostgreSQL 兼容客户端（dbAdmin）
 ├── routers/                # 路由入口层：仅定义路径与权限中间件
 ├── controllers/            # 控制器层：HTTP 请求/响应转换
 ├── services/               # 业务逻辑层：按业务域拆分子目录
@@ -34,8 +34,7 @@ resume-backend-node/
 ├── utils/                  # 响应封装、JSON 提取、权限、费用计算
 ├── database/
 │   ├── init.sql            # 完整建表脚本（22 张表）
-│   ├── TABLES.md           # 表结构中文对照
-│   └── ops/                # 运维 SQL（额度初始化、清用户等）
+│   └── TABLES.md           # 表结构中文对照
 └── data/uploads/           # 本地上传目录（开发默认，生产用 UPLOAD_DIR）
 ```
 
@@ -45,23 +44,22 @@ resume-backend-node/
 |---|---|
 | `routers` | 定义 HTTP 路径、方法、中间件顺序，不处理业务逻辑 |
 | `controllers` | 解析请求参数、调用 service、统一返回 success/error |
-| `services` | 业务逻辑核心：AI 调用、PDF 处理、简历 CRUD、管理后台统计等 |
+| `services` | 业务逻辑核心，按业务域使用子目录归类 |
 | `repositories` | 直接操作 PostgreSQL 数据库，屏蔽 SQL 细节 |
 | `middlewares` | `auth` 认证、`permission` 权限、`validate` 参数校验、`errorHandler` 全局错误处理 |
 | `validators` | 使用 `express-validator` 声明请求参数规则 |
-| `utils` | 跨模块通用工具函数 |
+| `utils` | 跨层通用工具函数 |
 
 ### 业务模块划分
 
 | 目录 | 模块 | 说明 |
 |---|---|---|
-| `services/wallet/` | 钱包服务 | `wallet.service.js` 余额查询、扣费、注册赠送、管理员调额 |
-| `services/ai/` | AI 服务 | `ai.quota.service.js` 余额校验与扣费审计 |
-| `services/pdf/` | PDF 服务 | `pdf.service.js` 负责上传、解析、文本提取、文件元信息 |
-| `services/resume/` | 简历服务 | `resume.service.js` 处理简历 CRUD 业务 |
-| `services/auth/` | 认证服务 | `auth.service.js` JWT + OTP + 密码登录、刷新、密码重置 |
-| `services/admin/` | 管理后台 | 按功能拆分为 dashboard、user、order、aiCall、resume、config、crud、feedback 等服务 |
-| `repositories/` | 数据仓库 | `resume.repository.js`、`user.repository.js`、`order.repository.js` 等 |
+| `services/wallet/` | 钱包服务 | 余额查询、扣费、注册赠送、管理员调额 |
+| `services/ai/` | AI 服务 | 模型路由、提示词、额度校验与调用 |
+| `services/pdf/` | PDF 服务 | 上传、解析、文本提取、文件元信息 |
+| `services/resume/` | 简历服务 | 简历 CRUD 业务 |
+| `services/auth/` | 认证服务 | JWT + OTP + 密码登录、刷新、密码重置 |
+| `services/admin/` | 管理后台 | dashboard、user、order、aiCall、resume、config、crud、feedback 等服务 |
 
 ## 路由说明
 
