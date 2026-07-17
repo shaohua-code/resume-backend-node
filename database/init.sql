@@ -9,7 +9,7 @@
 -- 1. 宝塔 → 软件商店 → 安装 PostgreSQL
 -- 2. 数据库 → PostgreSQL → 添加数据库 ai-resume / 用户 ai-resume
 -- 3. 点管理 → SQL 执行 → 粘贴本文件全文 → 执行
--- 4. 验证：SELECT count(*) FROM information_schema.tables WHERE table_schema='public'; -- 预期 21
+-- 4. 验证：SELECT count(*) FROM information_schema.tables WHERE table_schema='public'; -- 预期 22
 --
 -- 【后端 .env】
 -- DATABASE_URL=postgresql://ai-resume:密码@175.178.62.55:5432/ai-resume

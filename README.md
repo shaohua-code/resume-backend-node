@@ -33,7 +33,7 @@ resume-backend-node/
 ├── validators/             # express-validator 参数校验规则
 ├── utils/                  # 响应封装、JSON 提取、权限、费用计算
 ├── database/
-│   ├── init.sql            # 完整建表脚本（20 张表）
+│   ├── init.sql            # 完整建表脚本（22 张表）
 │   ├── TABLES.md           # 表结构中文对照
 │   └── ops/                # 运维 SQL（额度初始化、清用户等）
 └── data/uploads/           # 本地上传目录（开发默认，生产用 UPLOAD_DIR）

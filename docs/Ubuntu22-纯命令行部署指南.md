@@ -167,7 +167,7 @@ nano /tmp/init.sql
 psql -h 127.0.0.1 -U ai_resume -d ai_resume -f /tmp/init.sql
 ```
 
-### 4.3 验证（应有 20 张表）
+### 4.3 验证（应有 22 张表）
 
 ```bash
 psql -h 127.0.0.1 -U ai_resume -d ai_resume -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';"
