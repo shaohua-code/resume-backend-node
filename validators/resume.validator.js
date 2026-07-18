@@ -11,6 +11,8 @@ const { body, param, query } = require('express-validator')
 const create = [
   body('title').optional().isString().withMessage('title 必须是字符串'),
   body('resume_json').notEmpty().withMessage('resume_json 不能为空'),
+  // 客户端生成保存键，保证 AI 已完成但网络响应丢失时可安全重试。
+  body('client_request_id').optional().isString().trim().isLength({ min: 8, max: 100 }).withMessage('client_request_id 长度必须为 8-100 个字符'),
 ]
 
 /**
@@ -28,6 +30,7 @@ const update = [
 const save = [
   body('title').optional().isString().withMessage('title 必须是字符串'),
   body('resume_json').notEmpty().withMessage('resume_json 不能为空'),
+  body('client_request_id').optional().isString().trim().isLength({ min: 8, max: 100 }).withMessage('client_request_id 长度必须为 8-100 个字符'),
 ]
 
 /**

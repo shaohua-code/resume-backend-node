@@ -5,7 +5,7 @@
  */
 
 const express = require('express')
-const { authRequired } = require('../middlewares/auth')
+const { authRequired, emailBindingRequired } = require('../middlewares/auth')
 const { validate } = require('../middlewares/validate')
 const pdfController = require('../controllers/pdf.controller')
 const pdfValidator = require('../validators/pdf.validator')
@@ -19,37 +19,37 @@ router.use(authRequired)
  * 上传 PDF 并由 AI 同步优化
  * POST /api/pdf/uploadOptimize
  */
-router.post('/uploadOptimize', pdfValidator.uploadOptimize, validate, pdfController.uploadOptimize)
+router.post('/uploadOptimize', emailBindingRequired, pdfValidator.uploadOptimize, validate, pdfController.uploadOptimize)
 
 /**
  * 上传 PDF 并由 AI 流式优化（SSE）
  * POST /api/pdf/uploadOptimize/stream
  */
-router.post('/uploadOptimize/stream', pdfValidator.uploadOptimize, validate, pdfController.uploadOptimizeStream)
+router.post('/uploadOptimize/stream', emailBindingRequired, pdfValidator.uploadOptimize, validate, pdfController.uploadOptimizeStream)
 
 /**
  * 使用已上传 PDF 进行 AI 同步优化
  * POST /api/pdf/uploadOptimize/existing
  */
-router.post('/uploadOptimize/existing', pdfValidator.existingOptimize, validate, pdfController.existingOptimize)
+router.post('/uploadOptimize/existing', emailBindingRequired, pdfValidator.existingOptimize, validate, pdfController.existingOptimize)
 
 /**
  * 使用已上传 PDF 进行 AI 流式优化（SSE）
  * POST /api/pdf/uploadOptimize/existing/stream
  */
-router.post('/uploadOptimize/existing/stream', pdfValidator.existingOptimize, validate, pdfController.existingOptimizeStream)
+router.post('/uploadOptimize/existing/stream', emailBindingRequired, pdfValidator.existingOptimize, validate, pdfController.existingOptimizeStream)
 
 /**
  * 上传 PDF 并由 AI 根据岗位 JD 流式优化（SSE）
  * POST /api/pdf/uploadOptimizeByJd/stream
  */
-router.post('/uploadOptimizeByJd/stream', pdfValidator.uploadOptimizeByJd, validate, pdfController.uploadOptimizeByJdStream)
+router.post('/uploadOptimizeByJd/stream', emailBindingRequired, pdfValidator.uploadOptimizeByJd, validate, pdfController.uploadOptimizeByJdStream)
 
 /**
  * 使用已上传 PDF 根据岗位 JD 流式优化（SSE）
  * POST /api/pdf/uploadOptimizeByJd/existing/stream
  */
-router.post('/uploadOptimizeByJd/existing/stream', pdfValidator.existingOptimizeByJd, validate, pdfController.existingOptimizeByJdStream)
+router.post('/uploadOptimizeByJd/existing/stream', emailBindingRequired, pdfValidator.existingOptimizeByJd, validate, pdfController.existingOptimizeByJdStream)
 
 /**
  * 获取当前用户已上传 PDF 元信息

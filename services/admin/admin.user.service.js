@@ -159,10 +159,28 @@ async function resetPassword(req) {
   const tempPassword = crypto.randomBytes(4).toString('hex');
   const passwordHash = await bcrypt.hash(tempPassword, 10);
 
-  await db.query(
-    'UPDATE public.users SET password_hash = $1, password_plain = $2, updated_at = now() WHERE id = $3',
-    [passwordHash, tempPassword, target.user_id],
-  );
+  const client = await db.getPool().connect();
+  let transactionOpen = false;
+  try {
+    await client.query('BEGIN');
+    transactionOpen = true;
+    // 管理端只返回一次临时密码，不再写入可逆明文，并立即撤销目标用户全部旧会话。
+    await client.query(
+      `UPDATE public.users
+       SET password_hash = $1, password_plain = NULL,
+           session_version = session_version + 1, updated_at = now()
+       WHERE id = $2`,
+      [passwordHash, target.user_id],
+    );
+    await client.query('DELETE FROM public.refresh_tokens WHERE user_id = $1', [target.user_id]);
+    await client.query('COMMIT');
+    transactionOpen = false;
+  } catch (error) {
+    if (transactionOpen) await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 
   await logAdminAction(req, 'reset_password', 'user_profile', req.params.userId);
   return { temp_password: tempPassword, message: '已生成临时密码，请告知用户登录后尽快修改' };

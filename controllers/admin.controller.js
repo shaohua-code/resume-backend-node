@@ -123,7 +123,7 @@ async function updateUser(req, res) {
 async function resetPassword(req, res) {
   try {
     const data = await userService.resetPassword(req);
-    return res.json({ success: true, data, message: '重置链接已生成' });
+    return res.json({ success: true, data, message: '临时密码已生成，请仅展示并交付一次' });
   } catch (err) {
     return handleError(res, err);
   }

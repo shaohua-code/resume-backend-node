@@ -9,10 +9,13 @@ const { initWalletForNewUser } = require('./wallet/wallet.service');
 
 function buildProfilePayload(user) {
   const metadata = user.user_metadata || {};
+  const email = user.email || null;
+  const account = user.account || metadata.username || '';
   return {
     user_id: user.id,
-    email: user.email || '',
-    nickname: metadata.nickname || (user.email ? user.email.split('@')[0] : '用户'),
+    // 随机账号注册时邮箱应保持 NULL，绑定成功后才同步真实邮箱。
+    email,
+    nickname: metadata.nickname || account || (email ? email.split('@')[0] : '用户'),
     update_time: new Date().toISOString(),
   };
 }
@@ -48,12 +51,12 @@ async function ensureUserProfile(user) {
     .single();
 
   if (existing) {
-    // 每次登录同步邮箱和昵称，角色与封禁状态由后台维护，不能被登录流程覆盖。
+    // 每次登录同步邮箱；已有昵称由用户资料维护，不能被随机账号默认值覆盖。
     const { data, error } = await dbAdmin
       .from('user_profile')
       .update({
         email: payload.email,
-        nickname: payload.nickname,
+        nickname: existing.nickname || payload.nickname,
         update_time: payload.update_time,
       })
       .eq('user_id', user.id)
@@ -74,7 +77,7 @@ async function ensureUserProfile(user) {
     .select()
     .single();
   if (error) throw error;
-  // 新用户注册成功后自动创建钱包并赠送额度
+  // 资料兜底只创建零余额钱包；首次验证邮箱后才由认证事务发放一次赠金。
   await initWalletForNewUser(user.id);
   return attachPermissionInfo(data);
 }

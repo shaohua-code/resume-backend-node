@@ -22,24 +22,8 @@ function mapResumeItem(r) {
 }
 
 async function createResume(userId, body) {
-  // 数量限制：超过上限时自动删除最早创建的简历
-  const { count, error: countError } = await resumeRepo.countByUser(userId);
-  if (countError) {
-    throw Object.assign(new Error(`查询简历数量失败：${countError.message}`), { statusCode: 500 });
-  }
-  if (count >= MAX_RESUME_COUNT) {
-    // 删除最早创建的简历，腾出名额
-    const { data: oldest, error: oldestError } = await resumeRepo.findOldestByUser(userId);
-    if (oldestError || !oldest) {
-      throw Object.assign(new Error('替换旧简历失败，请先手动删除后再创建'), { statusCode: 500 });
-    }
-    const { error: delError } = await resumeRepo.deleteResume(userId, oldest.id);
-    if (delError) {
-      throw Object.assign(new Error(`替换旧简历失败：${delError.message}`), { statusCode: 500 });
-    }
-  }
-
-  const { data, error } = await resumeRepo.createResume(userId, body);
+  // 超限替换与创建由仓储在同一事务中完成，避免并发突破上限或先删后建失败。
+  const { data, error } = await resumeRepo.createWithinLimit(userId, body, MAX_RESUME_COUNT);
   if (error) {
     console.error('[create] 数据库 error =', error);
     throw Object.assign(new Error(`创建失败：${error.message}`), { code: error.code, statusCode: 500 });
@@ -60,11 +44,12 @@ async function updateResume(userId, resumeId, body) {
 }
 
 async function saveResume(userId, body) {
-  const { id, title, resume_json, template_id, score } = body || {};
+  const { id, title, resume_json, template_id, score, client_request_id } = body || {};
   if (id) {
     return updateResume(userId, id, { title, resume_json, template_id, score });
   }
-  return createResume(userId, { title, resume_json, template_id, score });
+  // 兼容保存入口的首次创建也透传幂等键，与 /resume/create 保持相同重试语义。
+  return createResume(userId, { title, resume_json, template_id, score, client_request_id });
 }
 
 async function getResumeDetail(userId, resumeId) {

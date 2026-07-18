@@ -1,6 +1,6 @@
 /**
  * 钱包业务服务
- * 负责余额查询、注册赠送、AI 扣费、管理员额度分配（统一 balance 模型）
+ * 负责余额查询、AI 扣费、管理员额度分配（统一 balance 模型）；首次邮箱验证赠金由认证事务唯一处理。
  */
 
 const walletRepo = require('../../repositories/wallet.repository')
@@ -8,6 +8,7 @@ const userRepo = require('../../repositories/user.repository')
 const { ROLES, canManageRole } = require('../../utils/permissions')
 const { logAdminAction, getOwnedUserIds, canAccessUser } = require('../admin/admin.common.service')
 const { dbAdmin } = require('../../dbClient')
+const db = require('../../lib/db')
 
 // 流水类型枚举
 const LEDGER_TYPES = {
@@ -22,7 +23,7 @@ const LEDGER_TYPES = {
 const MIN_AI_BALANCE = 0.01
 
 /**
- * 从系统配置读取新用户注册赠送金额
+ * 从系统配置读取首次验证邮箱赠送金额上限
  * @returns {Promise<number>}
  */
 async function getRegisterGiftAmount() {
@@ -89,24 +90,15 @@ async function getWalletOrNull(userId) {
  * @param {string} userId
  */
 async function ensureWalletRecord(userId) {
-  const existing = await getWalletOrNull(userId)
-  if (existing) {
-    return existing
-  }
-
-  const now = new Date().toISOString()
-  const { data: wallet, error } = await walletRepo.createWallet({
-    user_id: userId,
-    balance: 0,
-    total_consumed: 0,
-    update_time: now,
-  })
-
-  if (error) {
-    throw Object.assign(new Error(`创建钱包失败：${error.message}`), { statusCode: 500 })
-  }
-
-  return wallet
+  // ON CONFLICT 让资料补全、余额查询等并发兜底只得到同一个零余额钱包，不触发任何赠金。
+  const { rows } = await db.query(
+    `INSERT INTO public.user_wallet (user_id, balance, total_consumed, update_time)
+     VALUES ($1, 0, 0, now())
+     ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
+     RETURNING *`,
+    [userId],
+  )
+  return rows[0]
 }
 
 /**
@@ -122,88 +114,12 @@ async function ensureTargetWallet(targetProfile) {
 }
 
 /**
- * 从超级管理员余额扣减注册赠送金额
- * @param {number} amount
- * @returns {Promise<number>} 实际扣减金额
- */
-async function deductSuperAdminForRegisterGift(amount) {
-  const deductAmount = roundMoney(amount)
-  if (deductAmount <= 0) return 0
-
-  const superAdminId = await findFirstSuperAdminId()
-  if (!superAdminId) {
-    console.warn('[registerGift] 未找到超级管理员，跳过扣减')
-    return 0
-  }
-
-  await ensureWalletRecord(superAdminId)
-  const wallet = await getWalletOrNull(superAdminId)
-  const available = roundMoney(wallet?.balance || 0)
-  const actualDeduct = roundMoney(Math.min(deductAmount, available))
-
-  if (actualDeduct <= 0) {
-    console.warn('[registerGift] 超级管理员余额不足，赠送金额为 0')
-    return 0
-  }
-
-  await changeBalance({
-    userId: superAdminId,
-    delta: -actualDeduct,
-    type: LEDGER_TYPES.REGISTER_GIFT,
-    remark: `新用户注册赠送扣减 ¥${actualDeduct}`,
-    paidAmount: 0,
-  })
-
-  return actualDeduct
-}
-
-/**
- * 新用户注册后初始化钱包并写入注册赠送流水
- * 注册赠送从超级管理员余额扣减
+ * 兼容旧调用方的钱包初始化入口：只创建零余额钱包。
+ * 注册赠金只能在邮箱首次验证事务中发放，避免资料补全或余额查询绕过邮箱门禁。
  * @param {string} userId
  */
 async function initWalletForNewUser(userId) {
-  const existing = await getWalletOrNull(userId)
-  if (existing) {
-    return existing
-  }
-
-  const giftAmount = await getRegisterGiftAmount()
-  const now = new Date().toISOString()
-
-  // 先从超管扣减，余额不足则实际赠送为 0
-  const actualGift = await deductSuperAdminForRegisterGift(giftAmount)
-
-  const { data: wallet, error: walletError } = await walletRepo.createWallet({
-    user_id: userId,
-    balance: actualGift,
-    total_consumed: 0,
-    update_time: now,
-  })
-
-  if (walletError) {
-    throw Object.assign(new Error(`创建钱包失败：${walletError.message}`), { statusCode: 500 })
-  }
-
-  if (actualGift > 0) {
-    const superAdminId = await findFirstSuperAdminId()
-    const { error: ledgerError } = await walletRepo.insertLedger({
-      user_id: userId,
-      type: LEDGER_TYPES.REGISTER_GIFT,
-      amount: actualGift,
-      balance_after: actualGift,
-      remark: '新用户注册赠送',
-      operator_id: superAdminId,
-      paid_amount: 0,
-      create_time: now,
-    })
-
-    if (ledgerError) {
-      throw Object.assign(new Error(`写入注册赠送流水失败：${ledgerError.message}`), { statusCode: 500 })
-    }
-  }
-
-  return wallet
+  return ensureWalletRecord(userId)
 }
 
 /**
@@ -215,7 +131,7 @@ async function getBalance(userId, role = ROLES.USER) {
   void role
   let wallet = await getWalletOrNull(userId)
   if (!wallet) {
-    wallet = role === ROLES.USER ? await initWalletForNewUser(userId) : await ensureWalletRecord(userId)
+    wallet = await ensureWalletRecord(userId)
   }
   return {
     balance: roundMoney(wallet.balance),
@@ -256,55 +172,69 @@ async function listLedger(userId, page, size) {
  * @param {Object} options
  */
 async function changeBalance({ userId, delta, type, remark, operatorId = null, aiCallId = null, paidAmount = 0 }) {
-  const wallet = await getWalletOrNull(userId)
-  if (!wallet) {
-    throw Object.assign(new Error('用户钱包不存在'), { statusCode: 404 })
+  const client = await db.getPool().connect()
+  let transactionOpen = false
+  try {
+    await client.query('BEGIN')
+    transactionOpen = true
+    // 所有余额写入共享钱包行锁，避免 AI 扣费、管理员转账与邮箱赠金互相覆盖。
+    const { rows } = await client.query(
+      `SELECT balance, total_consumed
+       FROM public.user_wallet
+       WHERE user_id = $1
+       FOR UPDATE`,
+      [userId],
+    )
+    const wallet = rows[0]
+    if (!wallet) {
+      throw Object.assign(new Error('用户钱包不存在'), { statusCode: 404 })
+    }
+
+    const currentBalance = roundMoney(wallet.balance)
+    const nextBalance = roundMoney(currentBalance + delta)
+    if (nextBalance < 0) {
+      const err = new Error('账户余额不足，请先充值或联系管理员')
+      err.code = 'INSUFFICIENT_BALANCE'
+      err.statusCode = 402
+      throw err
+    }
+
+    // 仅 AI_CONSUME 扣费计入累计消费；额度发放/回收等不计入。
+    const totalConsumed = roundMoney(
+      Number(wallet.total_consumed || 0)
+        + (type === LEDGER_TYPES.AI_CONSUME && delta < 0 ? Math.abs(delta) : 0),
+    )
+    await client.query(
+      `UPDATE public.user_wallet
+       SET balance = $1, total_consumed = $2, update_time = now()
+       WHERE user_id = $3`,
+      [nextBalance, totalConsumed, userId],
+    )
+    const { rows: ledgerRows } = await client.query(
+      `INSERT INTO public.balance_ledger (
+        user_id, type, amount, balance_after, remark, operator_id, ai_call_id, paid_amount, create_time
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+      RETURNING *`,
+      [
+        userId,
+        type,
+        roundMoney(delta),
+        nextBalance,
+        remark || '',
+        operatorId,
+        aiCallId,
+        roundMoney(paidAmount || 0),
+      ],
+    )
+    await client.query('COMMIT')
+    transactionOpen = false
+    return { balance: nextBalance, ledger: ledgerRows[0] }
+  } catch (error) {
+    if (transactionOpen) await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
   }
-
-  const currentBalance = roundMoney(wallet.balance)
-  const nextBalance = roundMoney(currentBalance + delta)
-
-  if (nextBalance < 0) {
-    const err = new Error('账户余额不足，请先充值或联系管理员')
-    err.code = 'INSUFFICIENT_BALANCE'
-    err.statusCode = 402
-    throw err
-  }
-
-  // 仅 AI_CONSUME 扣费计入累计消费；额度发放/回收等不计入
-  const totalConsumed = roundMoney(
-    Number(wallet.total_consumed || 0)
-      + (type === LEDGER_TYPES.AI_CONSUME && delta < 0 ? Math.abs(delta) : 0),
-  )
-  const now = new Date().toISOString()
-
-  const { error: updateError } = await walletRepo.updateWallet(userId, {
-    balance: nextBalance,
-    total_consumed: totalConsumed,
-    update_time: now,
-  })
-
-  if (updateError) {
-    throw Object.assign(new Error(`更新余额失败：${updateError.message}`), { statusCode: 500 })
-  }
-
-  const { data: ledger, error: ledgerError } = await walletRepo.insertLedger({
-    user_id: userId,
-    type,
-    amount: roundMoney(delta),
-    balance_after: nextBalance,
-    remark: remark || '',
-    operator_id: operatorId,
-    ai_call_id: aiCallId,
-    paid_amount: roundMoney(paidAmount || 0),
-    create_time: now,
-  })
-
-  if (ledgerError) {
-    throw Object.assign(new Error(`写入流水失败：${ledgerError.message}`), { statusCode: 500 })
-  }
-
-  return { balance: nextBalance, ledger }
 }
 
 /**

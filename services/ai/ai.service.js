@@ -11,7 +11,12 @@
 const axios = require('axios');
 const { calcAiCost, normalizeUsage } = require('../../utils/ai_cost');
 const { extractJson } = require('../../utils/extractJson');
-const { AI_TASK, resolveModelConfig } = require('./ai.model');
+const {
+  AI_TASK,
+  resolveModelConfig,
+  resolveDeepseekFallbackConfig,
+} = require('./ai.model');
+const { withDeepseekFallback } = require('./ai.fallback');
 const {
   RESUME_GENERATE_PROMPT,
   LAZY_GENERATE_PROMPT,
@@ -66,8 +71,7 @@ function applyRuntimeOptions(payload, runtime) {
  * OpenAI Chat Completions 兼容接口通用方法（历史函数名保留为内部兼容）。
  * @returns {Promise<{ content: string, usage: object, model: string, cost: number }>}
  */
-async function callDeepseek(prompt, options = {}) {
-  const runtime = await resolveModelConfig(options.task, options.model);
+async function callChatCompletion(prompt, runtime) {
   assertRuntimeConfig(runtime);
   const headers = {
     Authorization: `Bearer ${runtime.apiKey}`,
@@ -95,12 +99,22 @@ async function callDeepseek(prompt, options = {}) {
   };
 }
 
+async function callDeepseek(prompt, options = {}) {
+  return withDeepseekFallback(
+    options.task,
+    async () => {
+      const runtime = await resolveModelConfig(options.task, options.model);
+      return callChatCompletion(prompt, runtime);
+    },
+    () => callChatCompletion(prompt, resolveDeepseekFallbackConfig(options.task)),
+  );
+}
+
 /**
  * 流式调用 OpenAI 兼容接口，通过 onChunk 回调推送增量文本。
  * @returns {Promise<{ content: string, usage: object, model: string, cost: number }>}
  */
-async function callDeepseekStream(prompt, options = {}, onChunk) {
-  const runtime = await resolveModelConfig(options.task, options.model);
+async function callChatCompletionStream(prompt, runtime, onChunk) {
   assertRuntimeConfig(runtime);
   const headers = {
     Authorization: `Bearer ${runtime.apiKey}`,
@@ -158,6 +172,32 @@ async function callDeepseekStream(prompt, options = {}, onChunk) {
     });
     response.data.on('error', reject);
   });
+}
+
+async function callDeepseekStream(prompt, options = {}, onChunk) {
+  let primaryEmittedContent = false;
+  const handlePrimaryChunk = (chunk, full) => {
+    primaryEmittedContent = true;
+    if (typeof onChunk === 'function') onChunk(chunk, full);
+  };
+
+  return withDeepseekFallback(
+    options.task,
+    async () => {
+      const runtime = await resolveModelConfig(options.task, options.model);
+      return callChatCompletionStream(prompt, runtime, handlePrimaryChunk);
+    },
+    () => callChatCompletionStream(
+      prompt,
+      resolveDeepseekFallbackConfig(options.task),
+      onChunk,
+    ),
+    {
+      // 已推送的半截内容无法从 SSE 客户端撤回；此时禁止拼接第二份流，
+      // 继续沿用首次错误。只有首个内容片段前失败才安全兜底。
+      canFallback: () => !primaryEmittedContent,
+    },
+  );
 }
 
 /**

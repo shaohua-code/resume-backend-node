@@ -136,6 +136,20 @@ function buildLegacyRuntime(task, requestedModel = '') {
   });
 }
 
+/**
+ * AI 优化失败时使用的 DeepSeek 运行配置。
+ * 绕过后台任务绑定，固定复用现有 DeepSeek 环境变量和任务级模型配置。
+ */
+function resolveDeepseekFallbackConfig(task) {
+  const modelKey = getLegacyModelKey(task);
+  return toRuntime({
+    model_key: modelKey,
+    name: modelKey,
+    provider: 'deepseek',
+    model_type: getTaskDefinition(task)?.required_model_type || AI_MODEL_TYPE.TEXT,
+  });
+}
+
 async function findEnabledModelByKey(modelKey) {
   const { data, error } = await dbAdmin
     .from('ai_model')
@@ -202,4 +216,5 @@ module.exports = {
   getModelPriceBaseline,
   resolveModel,
   resolveModelConfig,
+  resolveDeepseekFallbackConfig,
 };

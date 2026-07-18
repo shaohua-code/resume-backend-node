@@ -4,6 +4,7 @@
  */
 
 const { dbAdmin } = require('../dbClient');
+const db = require('../lib/db');
 
 function serializeResumeJson(resumeJson) {
   if (typeof resumeJson === 'object' && resumeJson !== null) {
@@ -22,15 +23,84 @@ function buildResumePayload(body) {
   };
 }
 
+/** 规范化可选的客户端保存幂等键；更新接口不会覆盖既有键。 */
+function getClientRequestId(body) {
+  const value = String(body?.client_request_id || '').trim();
+  return value || null;
+}
+
 async function createResume(userId, body) {
   const now = new Date().toISOString();
   const payload = {
     user_id: userId,
     ...buildResumePayload(body),
+    client_request_id: getClientRequestId(body),
     create_time: now,
     update_time: now,
   };
   return dbAdmin.from('resume').insert(payload).select().single();
+}
+
+/**
+ * 在单事务和用户级数据库锁内执行“超限替换 + 创建”。
+ * 这样并发生成既不会突破五份上限，也不会在新记录创建失败时提前丢掉旧简历。
+ */
+async function createWithinLimit(userId, body, maxCount) {
+  const client = await db.getPool().connect();
+  let transactionOpen = false;
+  try {
+    await client.query('BEGIN');
+    transactionOpen = true;
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`resume-limit:${userId}`]);
+
+    const clientRequestId = getClientRequestId(body);
+    if (clientRequestId) {
+      const { rows: idempotentRows } = await client.query(
+        `SELECT * FROM public.resume
+         WHERE user_id = $1 AND client_request_id = $2
+         LIMIT 1`,
+        [userId, clientRequestId],
+      );
+      if (idempotentRows.length) {
+        await client.query('COMMIT');
+        transactionOpen = false;
+        return { data: idempotentRows[0], error: null };
+      }
+    }
+
+    const { rows: existingRows } = await client.query(
+      `SELECT id
+       FROM public.resume
+       WHERE user_id = $1
+       ORDER BY create_time ASC, id ASC`,
+      [userId],
+    );
+    const deleteCount = Math.max(0, existingRows.length - Number(maxCount) + 1);
+    if (deleteCount > 0) {
+      const deleteIds = existingRows.slice(0, deleteCount).map((item) => item.id);
+      await client.query(
+        'DELETE FROM public.resume WHERE user_id = $1 AND id = ANY($2::bigint[])',
+        [userId, deleteIds],
+      );
+    }
+
+    const payload = buildResumePayload(body);
+    const { rows } = await client.query(
+      `INSERT INTO public.resume (
+        user_id, title, resume_json, template_id, score, client_request_id, create_time, update_time
+      ) VALUES ($1, $2, $3, $4, $5, $6, now(), now())
+      RETURNING *`,
+      [userId, payload.title, payload.resume_json, payload.template_id, payload.score, clientRequestId],
+    );
+    await client.query('COMMIT');
+    transactionOpen = false;
+    return { data: rows[0], error: null };
+  } catch (error) {
+    if (transactionOpen) await client.query('ROLLBACK');
+    return { data: null, error };
+  } finally {
+    client.release();
+  }
 }
 
 async function updateResume(userId, resumeId, body) {
@@ -131,6 +201,7 @@ async function listAdmin({ from, to, userId, userIds }) {
 
 module.exports = {
   createResume,
+  createWithinLimit,
   updateResume,
   findById,
   findByIdAdmin,

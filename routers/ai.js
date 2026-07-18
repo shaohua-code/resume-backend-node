@@ -5,15 +5,16 @@
  */
 
 const express = require('express')
-const { authRequired } = require('../middlewares/auth')
+const { authRequired, emailBindingRequired } = require('../middlewares/auth')
 const { validate } = require('../middlewares/validate')
 const aiController = require('../controllers/ai.controller')
 const aiValidator = require('../validators/ai.validator')
 
 const router = express.Router()
 
-// 所有 AI 接口都需要登录
+// 所有 AI 接口必须先登录，再由服务端确认当前账号已绑定并验证邮箱。
 router.use(authRequired)
+router.use(emailBindingRequired)
 
 /**
  * AI 生成简历（同步）

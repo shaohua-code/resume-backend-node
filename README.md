@@ -58,7 +58,7 @@ resume-backend-node/
 | `services/ai/` | AI 服务 | 模型路由、提示词、额度校验与调用 |
 | `services/pdf/` | PDF 服务 | 上传、解析、文本提取、文件元信息 |
 | `services/resume/` | 简历服务 | 简历 CRUD 业务 |
-| `services/auth/` | 认证服务 | JWT + OTP + 密码登录、刷新、密码重置 |
+| `services/auth/` | 认证服务 | 随机账号注册、JWT + OTP、邮箱绑定、密码登录、刷新与密码重置 |
 | `services/admin/` | 管理后台 | dashboard、user、order、aiCall、resume、config、crud、feedback 等服务 |
 
 ## 路由说明
@@ -67,9 +67,9 @@ resume-backend-node/
 
 | 前缀 | 路由文件 | 职责 |
 |---|---|---|
-| `/api/auth` | `routers/auth.js` | 登录、验证码、token 刷新、密码重置 |
-| `/api/ai` | `routers/ai.js` | AI 生成、分模块优化、岗位匹配分析、简历评分 |
-| `/api/pdf` | `routers/pdf.js` | PDF 上传、解析、AI 整体优化、文件管理 |
+| `/api/auth` | `routers/auth.js` | 随机账号注册、登录、邮箱绑定、token 刷新、密码重置 |
+| `/api/ai` | `routers/ai.js` | 绑定邮箱后可用的 AI 生成、分模块优化、岗位匹配分析、简历评分 |
+| `/api/pdf` | `routers/pdf.js` | PDF 上传、解析、AI 整体优化（需绑定邮箱）与普通文件管理 |
 | `/api/resume` | `routers/resume.js` | 简历 CRUD、导出记录 |
 | `/api/wallet` | `routers/wallet.js` | 用户余额与流水 |
 | `/api/admin` | `routers/admin.js` | 管理后台：用户、额度、AI 调用、简历、配置、反馈等 |
@@ -84,6 +84,23 @@ GET  /api/wallet/ledger            # 流水列表
 POST /api/admin/users/:id/balance  # 调整额度 { amount, remark }
 GET  /api/admin/wallets            # 管理端钱包列表
 ```
+
+### 认证与邮箱绑定接口
+
+```
+POST /api/auth/register         # 无需邮箱，生成一次性账号和随机密码
+POST /api/auth/loginPassword    # 账号或已绑定邮箱 + 密码登录
+POST /api/auth/sendCode         # 向已绑定邮箱发送登录验证码
+POST /api/auth/login            # 已绑定邮箱验证码登录，不自动创建账号
+POST /api/auth/email/send-code  # 登录后发送邮箱绑定验证码
+POST /api/auth/email/bind       # 校验验证码并绑定当前账号
+```
+
+注册响应中的 `credentials.password` 只返回一次，服务端仅保存 bcrypt 哈希；注册事务同时创建资料、零余额钱包、邀请关系和会话，失败时整体回滚。首次邮箱验证在绑定事务中至多发放一次赠金，金额不超过配置额与首位超级管理员可用余额。所有 `/api/ai` 接口和六个 PDF AI POST 会检查数据库中的最新邮箱绑定状态；未绑定统一返回 `403 / EMAIL_BINDING_REQUIRED`，而 PDF 元数据查询与删除保持可用。
+
+刷新令牌采用一次性原子轮换。用户找回密码或管理员重置密码时会递增会话版本并删除全部 refresh token；旧 access token 也会在下一次认证时立即失效。`password_plain` 仅保留为数据库兼容列，初始化脚本会清空历史值，运行代码不再写入。
+
+AI 最终结果首次保存可携带 `client_request_id`。后端在用户级锁内先按该键返回既有记录，再执行“超限替换 + 创建”，因此服务端已提交但客户端未收到响应时可以安全重试，不会重复创建简历或误删另一份旧简历。
 
 ### AI 优化接口
 
@@ -202,6 +219,6 @@ psql -h 127.0.0.1 -U ai_resume -d ai_resume -f database/init.sql
 - Service 层处理业务规则，Repository 层只操作数据库。
 - 所有导出函数均添加中文 JSDoc 注释。
 - AI 调用统一经过 `services/ai/ai.quota.service.js` 校验余额并在成功后扣费、记录审计日志。
-- 新用户注册在 `user_profile_service.js` 中自动初始化钱包并写入 `REGISTER_GIFT` 流水。
+- 随机账号注册在同一事务中初始化 ¥0 钱包；首次验证邮箱时再原子发放一次 `REGISTER_GIFT`，并同步写入用户与超管流水。
 
 提交代码前阅读 [`CONTRIBUTING.md`](CONTRIBUTING.md)。输入 `--提交` 时，项目的 `commit-ai-resume` Skill 会审查当前差异、运行必要验证，并按规范创建本地提交；不会自动推送。

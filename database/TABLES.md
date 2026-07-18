@@ -6,7 +6,7 @@
 
 ```sql
 SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
--- 预期：21
+-- 预期：22
 ```
 
 ---
@@ -18,7 +18,9 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | 项 | 说明 |
 |---|---|
 | 主键 | `id` (UUID) |
-| 核心字段 | `email`（唯一）、`password_hash`、`password_plain`（最近登录/设置的明文）、`email_verified`、`created_at`、`updated_at` |
+| 核心字段 | `account`（可空、存在时为小写且忽略大小写唯一）、`email`（可空且忽略大小写唯一）、`password_hash`、`password_plain`（仅保留为旧库结构兼容列，初始化脚本清空且运行代码不写入）、`email_verified`、`session_version`、`created_at`、`updated_at` |
+| 约束 | `email`、`account` 至少有一项非空；新注册账号使用 `account`，邮箱验证码绑定成功后才写入 `email` |
+| 会话撤销 | access token 携带 `session_version`；密码重置递增版本并删除 refresh token，使旧会话立即失效 |
 | 关联 | `user_profile.user_id` → `users.id`（CASCADE） |
 | 代码路径 | `services/auth/auth.service.js`（直连 `lib/db.js`） |
 
@@ -27,8 +29,8 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | 项 | 说明 |
 |---|---|
 | 主键 | `id` (BIGSERIAL) |
-| 核心字段 | `email`、`code`、`type`（login/register/reset）、`expires_at`、`used` |
-| 关联 | 无 FK，按 email 关联用户 |
+| 核心字段 | `user_id`（绑定邮箱验证码必填）、`email`、`code`、`type`（login/reset/bind_email）、`expires_at`、`used`、`attempt_count` |
+| 关联 | `user_id` → `users.id`（CASCADE，可空以兼容历史验证码）；登录与重置按邮箱关联，邮箱绑定同时按用户与邮箱关联 |
 | 代码路径 | `services/auth/auth.service.js` |
 
 ### refresh_tokens — 刷新令牌表
@@ -36,8 +38,9 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | 项 | 说明 |
 |---|---|
 | 主键 | `id` (BIGSERIAL) |
-| 核心字段 | `user_id`、`token_hash`、`expires_at` |
+| 核心字段 | `user_id`、`token_hash`、`session_version`、`expires_at` |
 | 关联 | `user_id` → `users.id`（CASCADE） |
+| 轮换规则 | refresh token 一次性原子消费；记录版本必须与 `users.session_version` 相同，否则拒绝轮换 |
 | 代码路径 | `lib/jwt.js` |
 
 ---
@@ -49,7 +52,7 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | 项 | 说明 |
 |---|---|
 | 主键 | `user_id` (UUID) |
-| 核心字段 | `email`、`nickname`、`role`（SUPER_ADMIN/ADMIN/USER）、`status`（ACTIVE/BANNED） |
+| 核心字段 | `email`（未绑定时可空）、`nickname`、`role`（SUPER_ADMIN/ADMIN/USER）、`status`（ACTIVE/BANNED） |
 | 关联 | `user_id` → `users.id`（CASCADE） |
 | 代码路径 | `repositories/user.repository.js`、`services/user_profile_service.js` |
 
@@ -62,7 +65,8 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | 项 | 说明 |
 |---|---|
 | 主键 | `id` (BIGSERIAL) |
-| 核心字段 | `user_id`、`title`、`resume_json`、`template_id`、`score` |
+| 核心字段 | `user_id`、`title`、`resume_json`、`template_id`、`score`、`client_request_id`（AI 结果首次保存幂等键） |
+| 约束 | `(user_id, client_request_id)` 在幂等键非空时唯一；同一用户重试返回既有记录，不重复创建或替换最早简历 |
 | 关联 | `user_id` → `users.id`（CASCADE） |
 | 代码路径 | `repositories/resume.repository.js`、`services/resume/resume.service.js` |
 
@@ -180,9 +184,9 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | 项 | 说明 |
 |---|---|
 | 主键 | `user_id` (UUID) |
-| 核心字段 | `balance`、`total_consumed` |
+| 核心字段 | `balance`、`total_consumed`、`register_gift_granted_at`（首次邮箱验证赠金幂等标记） |
 | 关联 | `user_id` → `users.id`（CASCADE） |
-| 代码路径 | `repositories/wallet.repository.js`、`services/wallet/wallet.service.js` |
+| 代码路径 | `repositories/wallet.repository.js`、`services/wallet/wallet.service.js`、`services/auth/auth.service.js`（首次验证赠金） |
 
 ### balance_ledger — 余额流水表
 
@@ -192,7 +196,7 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | 核心字段 | `user_id`、`type`、`amount`、`balance_after`、`remark`、`operator_id`、`ai_call_id`、`paid_amount` |
 | 流水类型 | `REGISTER_GIFT`、`AI_CONSUME`、`ADMIN_GRANT`、`ADMIN_DEDUCT`、`REFUND` |
 | 关联 | `user_id` → `users.id`；`ai_call_id` → `ai_call_record.id` |
-| 代码路径 | `repositories/wallet.repository.js`、`services/wallet/wallet.service.js` |
+| 代码路径 | `repositories/wallet.repository.js`、`services/wallet/wallet.service.js`、`services/auth/auth.service.js`（首次验证赠金） |
 
 ---
 
@@ -261,8 +265,8 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 
 | 英文表名 | 中文名称 | 简要说明 |
 |---------|---------|---------|
-| `users` | 用户账号表 | 邮箱、密码哈希、最近明文密码 |
-| `otp_codes` | 验证码表 | 登录/重置密码 OTP |
+| `users` | 用户账号表 | 随机账号、可选绑定邮箱、密码哈希、邮箱绑定状态 |
+| `otp_codes` | 验证码表 | 登录/重置密码/邮箱绑定 OTP 与错误次数 |
 | `refresh_tokens` | 刷新令牌表 | JWT refresh token |
 | `user_profile` | 用户资料表 | 昵称、角色、封禁状态 |
 | `resume` | 简历表 | 简历 JSON 数据 |
