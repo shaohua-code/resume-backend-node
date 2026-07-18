@@ -119,7 +119,8 @@ POST /api/ai/score                 # AI 简历评分
 ### PDF 识别与优化接口
 
 ```
-POST /api/pdf/uploadRecognize/stream           # 上传含文本层 PDF 并流式识别，只回填事实
+POST /api/pdf/uploadRecognize/stream           # 上传含文本层 PDF 并流式识别，只回填事实（覆盖唯一文件）
+POST /api/pdf/uploadRecognize/existing/stream  # 复用已上传唯一 PDF 流式识别，无需重新上传
 POST /api/pdf/uploadOptimize                  # 上传 PDF 同步优化
 POST /api/pdf/uploadOptimize/stream           # 上传 PDF 流式优化
 POST /api/pdf/uploadOptimize/existing         # 已有 PDF 同步优化

@@ -176,6 +176,49 @@ async function uploadRecognizeStream(req, res) {
   });
 }
 
+/**
+ * 使用已上传 PDF 流式纯识别（SSE），无需重新上传。
+ * 与 uploadRecognizeStream 共用 resume_extract，不做润色或优化。
+ */
+async function existingRecognizeStream(req, res) {
+  const taskType = 'resume_extract';
+  const model = getRequestedModel(req);
+  const userId = req.user.id;
+  const sendEvent = setupSSE(res);
+  const filePath = pdfService.getUserPdfPath(userId);
+  if (!pdfService.getFileMeta(userId)) {
+    sendEvent({ error: '暂无已上传的简历，请先上传 PDF' });
+    return res.end();
+  }
+  try {
+    await ensureAiQuota(req, taskType);
+    sendEvent({ status: '正在读取已上传 PDF 文本...' });
+    const pdfText = await pdfService.parsePdfFile(filePath);
+    sendEvent({ status: 'PDF 解析完成，正在识别简历字段...' });
+    const { data, meta } = await aiService.extractResumeFromTextStream(
+      pdfText,
+      { model },
+      (chunk) => sendEvent({ chunk }),
+    );
+    if (!data?.resume || Object.keys(data.resume).length === 0) {
+      await recordAiCall(req, taskType, model, false, '未能识别出有效简历信息');
+      sendEvent({ error: '未能识别出有效简历信息，请检查 PDF 内容后重试' });
+      return res.end();
+    }
+    await recordAiCall(req, taskType, model, true, '', meta);
+    sendEvent({ done: true, data: { resume: data.resume } });
+    return res.end();
+  } catch (e) {
+    if (['CONFIG_MISSING', 'AI_LIMIT_EXCEEDED', 'INSUFFICIENT_BALANCE', 'RESUME_TEXT_TOO_SHORT', 'RESUME_JSON_PARSE_FAILED'].includes(e.code)) {
+      sendEvent({ error: e.message, code: e.code });
+      return res.end();
+    }
+    await recordAiCall(req, taskType, model, false, e.message);
+    sendEvent({ error: `识别失败：${e.message}` });
+    return res.end();
+  }
+}
+
 /** 上传 PDF + JD 流式优化（SSE） */
 async function uploadOptimizeByJdStream(req, res) {
   const taskType = 'pdf_jd_optimize';
@@ -385,6 +428,7 @@ module.exports = {
   uploadOptimize,
   uploadOptimizeStream,
   uploadRecognizeStream,
+  existingRecognizeStream,
   uploadOptimizeByJdStream,
   existingOptimize,
   existingOptimizeStream,

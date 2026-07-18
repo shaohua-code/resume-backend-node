@@ -34,6 +34,12 @@ router.post('/uploadOptimize/stream', emailBindingRequired, pdfValidator.uploadO
 router.post('/uploadRecognize/stream', emailBindingRequired, pdfController.uploadRecognizeStream)
 
 /**
+ * 使用已上传 PDF 纯识别结构化简历（SSE），无需重新上传。
+ * POST /api/pdf/uploadRecognize/existing/stream
+ */
+router.post('/uploadRecognize/existing/stream', emailBindingRequired, pdfController.existingRecognizeStream)
+
+/**
  * 使用已上传 PDF 进行 AI 同步优化
  * POST /api/pdf/uploadOptimize/existing
  */
