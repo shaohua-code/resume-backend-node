@@ -13,6 +13,8 @@ const AI_MODEL_TYPE = {
 
 const AI_TASK = {
   RESUME_GENERATE: 'resume_generate',
+  // 识别任务与生成/优化分开记录，避免用量审计误判业务语义。
+  RESUME_EXTRACT: 'resume_extract',
   PROJECT_OPTIMIZE: 'project_optimize',
   SUMMARY_OPTIMIZE: 'summary_optimize',
   SKILLS_OPTIMIZE: 'skills_optimize',
@@ -28,6 +30,7 @@ const AI_TASK = {
 
 const AI_TASK_CATALOG = [
   { task_type: AI_TASK.RESUME_GENERATE, name: '简历生成', required_model_type: AI_MODEL_TYPE.TEXT },
+  { task_type: AI_TASK.RESUME_EXTRACT, name: '简历信息识别', required_model_type: AI_MODEL_TYPE.TEXT },
   { task_type: AI_TASK.PROJECT_OPTIMIZE, name: '项目经历优化', required_model_type: AI_MODEL_TYPE.TEXT },
   { task_type: AI_TASK.SUMMARY_OPTIMIZE, name: '个人评价优化', required_model_type: AI_MODEL_TYPE.TEXT },
   { task_type: AI_TASK.SKILLS_OPTIMIZE, name: '技能特长优化', required_model_type: AI_MODEL_TYPE.TEXT },
@@ -110,6 +113,8 @@ function getLegacyModelKey(task) {
   }
   const modelMap = {
     [AI_TASK.RESUME_GENERATE]: settings.DEEPSEEK_MODEL_RESUME_GENERATE,
+    // 纯识别与简历生成同属结构化文本任务，未配置后台映射时复用生成模型。
+    [AI_TASK.RESUME_EXTRACT]: settings.DEEPSEEK_MODEL_RESUME_GENERATE,
     [AI_TASK.PROJECT_OPTIMIZE]: settings.DEEPSEEK_MODEL_PROJECT_OPTIMIZE,
     [AI_TASK.SUMMARY_OPTIMIZE]: settings.DEEPSEEK_MODEL_PROJECT_OPTIMIZE,
     [AI_TASK.SKILLS_OPTIMIZE]: settings.DEEPSEEK_MODEL_PROJECT_OPTIMIZE,

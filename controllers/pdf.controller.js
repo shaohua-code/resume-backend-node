@@ -1,6 +1,6 @@
 /**
  * PDF 控制器
- * 处理 PDF 上传、解析、AI 优化（同步/流式）以及文件管理
+ * 处理 PDF 上传、事实识别、AI 优化（同步/流式）以及文件管理
  */
 
 const aiService = require('../services/ai/ai.service');
@@ -121,6 +121,56 @@ async function uploadOptimizeStream(req, res) {
       }
       await recordAiCall(req, taskType, model, false, e.message);
       sendEvent({ error: `处理失败：${e.message}` });
+      return res.end();
+    }
+  });
+}
+
+/**
+ * 上传 PDF 并流式识别结构化表单字段。
+ * 与历史 uploadOptimize 接口分离，识别阶段不做润色、补写或岗位优化。
+ */
+async function uploadRecognizeStream(req, res) {
+  const taskType = 'resume_extract';
+  upload.single('file')(req, res, async (uploadErr) => {
+    const sendEvent = setupSSE(res);
+    if (uploadErr) {
+      sendEvent({ error: uploadErr.message || '文件上传失败' });
+      return res.end();
+    }
+    if (!req.file) {
+      sendEvent({ error: '请上传 PDF 文件（字段名：file）' });
+      return res.end();
+    }
+
+    // multipart 字段只有在 multer 完成后才可读取，避免忽略前端传入的模型。
+    const model = getRequestedModel(req);
+    try {
+      await ensureAiQuota(req, taskType);
+      sendEvent({ status: '正在解析 PDF 文本...' });
+      const pdfText = await pdfService.parsePdfFile(req.file.path);
+      sendEvent({ status: 'PDF 解析完成，正在识别简历字段...' });
+      const { data, meta } = await aiService.extractResumeFromTextStream(
+        pdfText,
+        { model },
+        (chunk) => sendEvent({ chunk }),
+      );
+      if (!data?.resume || Object.keys(data.resume).length === 0) {
+        await recordAiCall(req, taskType, model, false, '未能识别出有效简历信息');
+        sendEvent({ error: '未能识别出有效简历信息，请检查 PDF 内容后重试' });
+        return res.end();
+      }
+
+      await recordAiCall(req, taskType, model, true, '', meta);
+      sendEvent({ done: true, data: { resume: data.resume } });
+      return res.end();
+    } catch (e) {
+      if (['CONFIG_MISSING', 'AI_LIMIT_EXCEEDED', 'INSUFFICIENT_BALANCE', 'RESUME_TEXT_TOO_SHORT', 'RESUME_JSON_PARSE_FAILED'].includes(e.code)) {
+        sendEvent({ error: e.message, code: e.code });
+        return res.end();
+      }
+      await recordAiCall(req, taskType, model, false, e.message);
+      sendEvent({ error: `识别失败：${e.message}` });
       return res.end();
     }
   });
@@ -334,6 +384,7 @@ async function deleteUploadedFile(req, res) {
 module.exports = {
   uploadOptimize,
   uploadOptimizeStream,
+  uploadRecognizeStream,
   uploadOptimizeByJdStream,
   existingOptimize,
   existingOptimizeStream,

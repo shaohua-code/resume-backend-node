@@ -1,7 +1,7 @@
 /**
  * PDF 路由模块
  * 挂载路径前缀：/api/pdf
- * 职责：PDF 上传、解析、AI 整体优化、已上传文件管理
+ * 职责：PDF 上传、事实识别、AI 整体优化、已上传文件管理
  */
 
 const express = require('express')
@@ -26,6 +26,12 @@ router.post('/uploadOptimize', emailBindingRequired, pdfValidator.uploadOptimize
  * POST /api/pdf/uploadOptimize/stream
  */
 router.post('/uploadOptimize/stream', emailBindingRequired, pdfValidator.uploadOptimize, validate, pdfController.uploadOptimizeStream)
+
+/**
+ * 上传 PDF 并纯识别结构化简历（SSE），不执行任何优化。
+ * POST /api/pdf/uploadRecognize/stream
+ */
+router.post('/uploadRecognize/stream', emailBindingRequired, pdfController.uploadRecognizeStream)
 
 /**
  * 使用已上传 PDF 进行 AI 同步优化

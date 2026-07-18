@@ -68,8 +68,8 @@ resume-backend-node/
 | 前缀 | 路由文件 | 职责 |
 |---|---|---|
 | `/api/auth` | `routers/auth.js` | 随机账号注册、登录、邮箱绑定、token 刷新、密码重置 |
-| `/api/ai` | `routers/ai.js` | 绑定邮箱后可用的 AI 生成、分模块优化、岗位匹配分析、简历评分 |
-| `/api/pdf` | `routers/pdf.js` | PDF 上传、解析、AI 整体优化（需绑定邮箱）与普通文件管理 |
+| `/api/ai` | `routers/ai.js` | 绑定邮箱后可用的文字简历事实识别、AI 生成、分模块优化、岗位匹配分析和简历评分 |
+| `/api/pdf` | `routers/pdf.js` | PDF 上传、事实识别、历史 AI 整体优化接口（需绑定邮箱）与普通文件管理 |
 | `/api/resume` | `routers/resume.js` | 简历 CRUD、导出记录 |
 | `/api/wallet` | `routers/wallet.js` | 用户余额与流水 |
 | `/api/admin` | `routers/admin.js` | 管理后台：用户、额度、AI 调用、简历、配置、反馈等 |
@@ -96,15 +96,16 @@ POST /api/auth/email/send-code  # 登录后发送邮箱绑定验证码
 POST /api/auth/email/bind       # 校验验证码并绑定当前账号
 ```
 
-注册响应中的 `credentials.password` 只返回一次，服务端仅保存 bcrypt 哈希；注册事务同时创建资料、零余额钱包、邀请关系和会话，失败时整体回滚。首次邮箱验证在绑定事务中至多发放一次赠金，金额不超过配置额与首位超级管理员可用余额。所有 `/api/ai` 接口和六个 PDF AI POST 会检查数据库中的最新邮箱绑定状态；未绑定统一返回 `403 / EMAIL_BINDING_REQUIRED`，而 PDF 元数据查询与删除保持可用。
+注册响应中的 `credentials.password` 只返回一次，服务端仅保存 bcrypt 哈希；注册事务同时创建资料、零余额钱包、邀请关系和会话，失败时整体回滚。首次邮箱验证在绑定事务中至多发放一次赠金，金额不超过配置额与首位超级管理员可用余额。所有 `/api/ai` 接口和 PDF AI POST 会检查数据库中的最新邮箱绑定状态；未绑定统一返回 `403 / EMAIL_BINDING_REQUIRED`，而 PDF 元数据查询与删除保持可用。
 
 刷新令牌采用一次性原子轮换。用户找回密码或管理员重置密码时会递增会话版本并删除全部 refresh token；旧 access token 也会在下一次认证时立即失效。`password_plain` 仅保留为数据库兼容列，初始化脚本会清空历史值，运行代码不再写入。
 
 AI 最终结果首次保存可携带 `client_request_id`。后端在用户级锁内先按该键返回既有记录，再执行“超限替换 + 创建”，因此服务端已提交但客户端未收到响应时可以安全重试，不会重复创建简历或误删另一份旧简历。
 
-### AI 优化接口
+### AI 识别与优化接口
 
 ```
+POST /api/ai/extract-resume/stream # 自由文字流式抽取简历事实（只识别，不优化）
 POST /api/ai/generate              # AI 生成简历（同步）
 POST /api/ai/generate/stream       # AI 生成简历（SSE 流式）
 POST /api/ai/optimize              # 项目描述优化（同步，兼容旧接口）
@@ -115,9 +116,10 @@ POST /api/ai/match                 # JD 岗位匹配
 POST /api/ai/score                 # AI 简历评分
 ```
 
-### PDF 优化接口
+### PDF 识别与优化接口
 
 ```
+POST /api/pdf/uploadRecognize/stream           # 上传含文本层 PDF 并流式识别，只回填事实
 POST /api/pdf/uploadOptimize                  # 上传 PDF 同步优化
 POST /api/pdf/uploadOptimize/stream           # 上传 PDF 流式优化
 POST /api/pdf/uploadOptimize/existing         # 已有 PDF 同步优化

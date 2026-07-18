@@ -1,25 +1,28 @@
 /**
  * AI 服务模块
  * 封装 OpenAI Chat Completions 兼容模型调用：
- * 1. AI 简历生成
- * 2. AI 项目/个人评价/技能/实习优化
- * 3. JD 岗位匹配
- * 4. AI 简历评分
- * 5. PDF 简历整体优化
+ * 1. PDF/文字简历事实识别
+ * 2. AI 简历生成
+ * 3. AI 项目/个人评价/技能/实习优化
+ * 4. JD 岗位匹配
+ * 5. AI 简历评分
+ * 6. PDF 简历整体优化
  */
 
 const axios = require('axios');
 const { calcAiCost, normalizeUsage } = require('../../utils/ai_cost');
-const { extractJson } = require('../../utils/extractJson');
+const { extractJson, extractJsonSafe } = require('../../utils/extractJson');
 const {
   AI_TASK,
   resolveModelConfig,
   resolveDeepseekFallbackConfig,
 } = require('./ai.model');
 const { withDeepseekFallback } = require('./ai.fallback');
+const { hasResumeContent, extractTargetPosition } = require('./resume-content');
 const {
   RESUME_GENERATE_PROMPT,
   LAZY_GENERATE_PROMPT,
+  RESUME_EXTRACT_PROMPT,
   OPTIMIZE_PROJECT_PROMPT,
   OPTIMIZE_SUMMARY_PROMPT,
   OPTIMIZE_SKILLS_PROMPT,
@@ -340,28 +343,7 @@ function normalizeInternship(internship) {
   };
 }
 
-/**
- * 从 AI 返回数据中提取目标岗位（兼容多种字段命名）
- * 优先级：标准英文字段 > camelCase 变体 > 中文直译字段 > 通用岗位字段
- * @param {Object} source AI 原始返回数据
- * @returns {string} 目标岗位字符串
- */
-function extractTargetPosition(source) {
-  return (
-    source.target_position ||
-    source.targetPosition ||
-    source['意向岗位'] ||
-    source['求职岗位'] ||
-    source['面试岗位'] ||
-    source['应聘岗位'] ||
-    source.position ||
-    source.job_title ||
-    source.jobTitle ||
-    ''
-  );
-}
-
-function normalizePdfResume(data) {
+function normalizePdfResume(data, options = {}) {
   const source = data.resume && typeof data.resume === 'object' ? data.resume : data;
   const educations = normalizeEducations(source);
   const firstEdu = educations[0] || normalizeEducation(source.education);
@@ -369,8 +351,8 @@ function normalizePdfResume(data) {
 
   return {
     name: source.name || '',
-    // 使用统一提取函数兼容多种岗位字段命名
-    target_position: extractTargetPosition(source),
+    // 纯识别只接受明确求职意向；历史优化接口继续兼容通用岗位别名。
+    target_position: extractTargetPosition(source, { strict: options.strictTargetPosition }),
     phone: source.phone || '',
     email: source.email || '',
     summary: source.summary || '',
@@ -406,23 +388,6 @@ function normalizePdfResume(data) {
     awards: Array.isArray(source.awards) ? source.awards.filter(Boolean) : [],
     certificates: Array.isArray(source.certificates) ? source.certificates.filter(Boolean) : [],
   };
-}
-
-function hasResumeContent(resume) {
-  return Boolean(
-    resume.name ||
-      resume.phone ||
-      resume.email ||
-      resume.summary ||
-      resume.school ||
-      (Array.isArray(resume.educations) && resume.educations.length) ||
-      (Array.isArray(resume.projects) && resume.projects.length) ||
-      (Array.isArray(resume.internships) && resume.internships.length) ||
-      (Array.isArray(resume.work_experiences) && resume.work_experiences.length) ||
-      (Array.isArray(resume.skills) && resume.skills.length) ||
-      (Array.isArray(resume.awards) && resume.awards.length) ||
-      (Array.isArray(resume.certificates) && resume.certificates.length),
-  );
 }
 
 /**
@@ -518,6 +483,48 @@ async function generateResumeStream(userInput, options = {}, onChunk) {
     onChunk,
   );
   return { data: extractJson(content), meta: { model, usage, cost } };
+}
+
+/**
+ * 从 PDF 解析文本或用户粘贴文本中纯识别结构化简历。
+ * 这里刻意使用独立 Prompt，不复用任何生成/优化提示词，避免识别阶段改写原始内容。
+ */
+async function extractResumeFromTextStream(resumeText, options = {}, onChunk) {
+  const sourceText = String(resumeText || '').trim();
+  // 有效字符过少时不进模型，避免无意义计费并给出更准确提示。
+  const meaningfulChars = sourceText.replace(/\s+/g, '');
+  if (meaningfulChars.length < 30) {
+    const err = new Error('简历文本过短或有效内容不足，请检查后重试');
+    err.code = 'RESUME_TEXT_TOO_SHORT';
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const prompt = format(RESUME_EXTRACT_PROMPT, {
+    resume_source: sourceText,
+  });
+  const { content, usage, model, cost } = await callDeepseekStream(
+    prompt,
+    { task: AI_TASK.RESUME_EXTRACT, model: options.model },
+    onChunk,
+  );
+  // 区分解析失败与合法空结果，避免 JSON 瑕疵被误报成“无简历信息”。
+  const { ok, data: parsed } = extractJsonSafe(content);
+  if (!ok) {
+    const err = new Error('AI 返回内容无法解析为结构化简历，请重试');
+    err.code = 'RESUME_JSON_PARSE_FAILED';
+    throw err;
+  }
+  if (!parsed || Object.keys(parsed).length === 0) {
+    return { data: { resume: {} }, meta: { model, usage, cost } };
+  }
+
+  // 禁止把模型偶尔返回的当前职位 position/job_title 推断成用户求职意向。
+  const resume = normalizePdfResume(parsed, { strictTargetPosition: true });
+  return {
+    data: { resume: hasResumeContent(resume) ? resume : {} },
+    meta: { model, usage, cost },
+  };
 }
 
 /**
@@ -946,6 +953,7 @@ async function optimizeResumeByJdStream(resumeJson, jdText = '', options = {}, o
 module.exports = {
   generateResume,
   generateResumeStream,
+  extractResumeFromTextStream,
   optimizeProject,
   optimizeProjectStream,
   optimizeSummaryStream,

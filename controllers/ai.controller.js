@@ -1,6 +1,6 @@
 /**
  * AI 控制器
- * 处理所有 AI 相关接口：简历生成、各类优化、岗位匹配分析、简历评分
+ * 处理所有 AI 相关接口：简历事实识别、简历生成、各类优化、岗位匹配分析、简历评分
  */
 
 const aiService = require('../services/ai/ai.service');
@@ -57,6 +57,14 @@ function respondAiError(res, e, { sendEvent, recordFn } = {}) {
       return res.end();
     }
     return error(res, 400, e.message);
+  }
+  // 识别链路业务错误：直接透传文案，避免包一层“AI服务调用失败”。
+  if (['RESUME_TEXT_TOO_SHORT', 'RESUME_JSON_PARSE_FAILED'].includes(e.code)) {
+    if (sendEvent) {
+      sendEvent({ error: e.message, code: e.code });
+      return res.end();
+    }
+    return error(res, e.statusCode || 400, e.message, { code: e.code });
   }
 
   const msg = `AI服务调用失败：${e.message}`;
@@ -118,6 +126,41 @@ async function generateStream(req, res) {
     }
     await recordAiCall(req, taskType, model, true, '', meta);
     sendEvent({ done: true, data });
+    return res.end();
+  } catch (e) {
+    return respondAiError(res, e, {
+      sendEvent,
+      recordFn: (msg) => recordAiCall(req, taskType, model, false, msg),
+    });
+  }
+}
+
+/**
+ * 从用户粘贴的简历文字中流式识别表单字段。
+ * 该接口只提取原文事实，不进入简历生成或优化流程。
+ */
+async function extractResumeStream(req, res) {
+  const taskType = 'resume_extract';
+  const model = getRequestedModel(req);
+  const rawText = String(req.body?.raw_text || '').trim();
+  const sendEvent = setupSSE(res);
+
+  try {
+    await ensureAiQuota(req, taskType);
+    sendEvent({ status: '正在识别文字中的简历字段...' });
+    const { data, meta } = await aiService.extractResumeFromTextStream(
+      rawText,
+      { model },
+      (chunk) => sendEvent({ chunk }),
+    );
+    if (!data?.resume || Object.keys(data.resume).length === 0) {
+      await recordAiCall(req, taskType, model, false, '未能识别出有效简历信息');
+      sendEvent({ error: '未能识别出有效简历信息，请检查文字内容后重试' });
+      return res.end();
+    }
+
+    await recordAiCall(req, taskType, model, true, '', meta);
+    sendEvent({ done: true, data: { resume: data.resume } });
     return res.end();
   } catch (e) {
     return respondAiError(res, e, {
@@ -411,6 +454,7 @@ async function scoreStream(req, res) {
 module.exports = {
   generate,
   generateStream,
+  extractResumeStream,
   optimize,
   optimizeByJdStream,
   extractJdImage,

@@ -16,6 +16,19 @@ const generate = [
 ]
 
 /**
+ * 纯文字识别只接收有限长度的原始简历文本，避免误把生成表单提交到该接口。
+ */
+const extractResume = [
+  body('raw_text')
+    .isString()
+    .withMessage('raw_text 必须是字符串')
+    .bail()
+    .trim()
+    .isLength({ min: 20, max: 8000 })
+    .withMessage('raw_text 长度必须在 20 到 8000 个字符之间'),
+]
+
+/**
  * 分模块流式优化参数校验
  */
 const optimizeStream = [
@@ -57,6 +70,7 @@ const score = [
 
 module.exports = {
   generate,
+  extractResume,
   optimizeStream,
   optimizeByJdStream,
   matchJd,

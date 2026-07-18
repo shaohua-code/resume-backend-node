@@ -1,7 +1,7 @@
 /**
  * AI 路由模块
  * 挂载路径前缀：/api/ai
- * 职责：AI 简历生成、分模块优化、岗位匹配分析、简历评分
+ * 职责：简历事实识别、AI 简历生成、分模块优化、岗位匹配分析、简历评分
  */
 
 const express = require('express')
@@ -27,6 +27,12 @@ router.post('/generate', aiValidator.generate, validate, aiController.generate)
  * POST /api/ai/generate/stream
  */
 router.post('/generate/stream', aiValidator.generate, validate, aiController.generateStream)
+
+/**
+ * 从自由文字中纯识别结构化简历（SSE），不生成或优化内容。
+ * POST /api/ai/extract-resume/stream
+ */
+router.post('/extract-resume/stream', aiValidator.extractResume, validate, aiController.extractResumeStream)
 
 /**
  * AI 优化项目描述（同步，兼容旧接口）

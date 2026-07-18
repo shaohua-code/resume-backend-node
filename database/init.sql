@@ -433,6 +433,8 @@ INSERT INTO public.ai_task_model (task_type, required_model_type, model_id)
 SELECT task.task_type, task.required_model_type, model.id
 FROM (VALUES
   ('resume_generate', 'text', 'deepseek-v4-flash'),
+  -- PDF 与文字识别共用纯提取任务，不复用生成或 PDF 优化任务。
+  ('resume_extract', 'text', 'deepseek-v4-flash'),
   ('project_optimize', 'text', 'deepseek-v4-flash'),
   ('summary_optimize', 'text', 'deepseek-v4-flash'),
   ('skills_optimize', 'text', 'deepseek-v4-flash'),

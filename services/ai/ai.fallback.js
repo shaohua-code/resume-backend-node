@@ -1,11 +1,12 @@
 /**
- * AI 优化任务的 DeepSeek 单次兜底策略。
+ * AI 识别与优化任务的 DeepSeek 单次兜底策略。
  *
  * 这里不做递归重试：主调用失败后最多执行一次 fallback。若兜底也失败，
  * 重新抛出主调用的错误，保持控制器现有的状态码与错误文案语义。
  */
 
 const DEEPSEEK_FALLBACK_TASKS = new Set([
+  'resume_extract',
   'project_optimize',
   'summary_optimize',
   'skills_optimize',
