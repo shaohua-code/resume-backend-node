@@ -3,7 +3,11 @@
  */
 
 const { dbAdmin } = require('../../dbClient')
-const { AI_TASK_CATALOG } = require('../ai/ai.model')
+const {
+  AI_TASK_CATALOG,
+  getPromptConfigurableTasks,
+  isPromptConfigurableTask,
+} = require('../ai/ai.model')
 const {
   isUserModelCustomizationEnabled,
   isUserPromptCustomizationEnabled,
@@ -27,6 +31,15 @@ function forbidden(message) {
 function assertTask(taskType) {
   const def = AI_TASK_CATALOG.find((item) => item.task_type === taskType)
   if (!def) throw badRequest('未知的 AI 任务类型')
+  return def
+}
+
+/** 提示词配置仅允许白名单任务，防止对隐藏任务写入覆盖 */
+function assertPromptConfigurableTask(taskType) {
+  const def = assertTask(taskType)
+  if (!isPromptConfigurableTask(taskType)) {
+    throw badRequest('该任务不支持自定义提示词')
+  }
   return def
 }
 
@@ -161,7 +174,8 @@ async function deleteUserTaskModel(userId, taskType) {
 async function listUserTaskPrompts(userId) {
   const customizationEnabled = await isUserPromptCustomizationEnabled()
   const items = []
-  for (const task of AI_TASK_CATALOG) {
+  // 仅返回可配置提示词的任务，隐藏 PDF 等内部任务
+  for (const task of getPromptConfigurableTasks()) {
     const display = await resolveDisplayInstruction(task.task_type, userId, {
       allowUser: customizationEnabled,
     })
@@ -181,7 +195,7 @@ async function listUserTaskPrompts(userId) {
       instruction: display.instruction,
       source: display.source,
       has_override: Boolean(customizationEnabled && userRow?.instruction),
-      // 编辑框默认值：仅个人覆盖；无覆盖时给代码/管理员默认便于参考（仍不是 Schema）
+      // 编辑框默认值：仅个人覆盖；无覆盖时给代码/管理员默认便于参考
       editable_instruction: customizationEnabled
         ? String(userRow?.instruction || display.instruction || '')
         : '',
@@ -194,7 +208,7 @@ async function upsertUserTaskPrompt(userId, taskType, instruction) {
   if (!(await isUserPromptCustomizationEnabled())) {
     throw forbidden('管理员尚未开放用户自定义提示词')
   }
-  assertTask(taskType)
+  assertPromptConfigurableTask(taskType)
   const text = String(instruction || '').trim()
   if (!text) throw badRequest('提示词不能为空')
   if (text.length > MAX_INSTRUCTION_LEN) {
@@ -239,7 +253,7 @@ async function deleteUserTaskPrompt(userId, taskType) {
   if (!(await isUserPromptCustomizationEnabled())) {
     throw forbidden('管理员尚未开放用户自定义提示词')
   }
-  assertTask(taskType)
+  assertPromptConfigurableTask(taskType)
   const { error } = await dbAdmin
     .from('user_ai_task_prompt')
     .delete()
@@ -252,7 +266,8 @@ async function deleteUserTaskPrompt(userId, taskType) {
 async function listAdminTaskPrompts() {
   const { data: rows } = await dbAdmin.from('ai_task_prompt').select('*')
   const map = new Map((rows || []).map((row) => [row.task_type, row]))
-  return AI_TASK_CATALOG.map((task) => {
+  // 管理端提示词页同样隐藏不可配置任务
+  return getPromptConfigurableTasks().map((task) => {
     const row = map.get(task.task_type)
     return {
       task_type: task.task_type,
@@ -265,7 +280,7 @@ async function listAdminTaskPrompts() {
 }
 
 async function upsertAdminTaskPrompt(req, taskType, instruction) {
-  assertTask(taskType)
+  assertPromptConfigurableTask(taskType)
   const text = String(instruction || '').trim()
   if (!text) throw badRequest('提示词不能为空')
   if (text.length > MAX_INSTRUCTION_LEN) {

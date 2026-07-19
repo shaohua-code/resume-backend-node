@@ -45,6 +45,22 @@ const AI_TASK_CATALOG = [
   { task_type: AI_TASK.JD_IMAGE_EXTRACT, name: 'JD 图片识别', required_model_type: AI_MODEL_TYPE.VISION },
 ];
 
+// 提示词配置页不展示、不可覆盖的任务（运行时与模型映射仍保留）
+const PROMPT_CONFIG_HIDDEN_TASKS = new Set([
+  AI_TASK.PDF_OPTIMIZE,
+  AI_TASK.PDF_JD_OPTIMIZE,
+]);
+
+/** 返回允许在任务提示词页配置的任务列表 */
+function getPromptConfigurableTasks() {
+  return AI_TASK_CATALOG.filter((task) => !PROMPT_CONFIG_HIDDEN_TASKS.has(task.task_type));
+}
+
+/** 判断任务是否允许配置业务提示词 */
+function isPromptConfigurableTask(taskType) {
+  return Boolean(taskType) && !PROMPT_CONFIG_HIDDEN_TASKS.has(taskType);
+}
+
 function getTaskDefinition(task) {
   return AI_TASK_CATALOG.find((item) => item.task_type === task) || null;
 }
@@ -238,6 +254,9 @@ module.exports = {
   AI_TASK,
   AI_TASK_CATALOG,
   AI_MODEL_TYPE,
+  PROMPT_CONFIG_HIDDEN_TASKS,
+  getPromptConfigurableTasks,
+  isPromptConfigurableTask,
   getTaskDefinition,
   getModelPriceBaseline,
   resolveModel,
