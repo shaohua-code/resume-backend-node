@@ -53,14 +53,36 @@ function extractTargetPosition(source = {}, options = {}) {
   const explicitTarget = (
     source.target_position
     || source.targetPosition
+    // 示例与常见简历原文多用「求职意向」，必须纳入严格模式别名
+    || source['求职意向']
     || source['意向岗位']
+    || source['目标岗位']
+    || source['期望岗位']
     || source['求职岗位']
     || source['面试岗位']
     || source['应聘岗位']
+    || source['意向职位']
+    || source.job_intention
+    || source.jobIntention
     || ''
   );
-  if (options.strict) return explicitTarget;
-  return explicitTarget || source.position || source.job_title || source.jobTitle || '';
+  if (options.strict) return String(explicitTarget || '').trim();
+  return String(
+    explicitTarget || source.position || source.job_title || source.jobTitle || '',
+  ).trim();
 }
 
-module.exports = { hasResumeContent, extractTargetPosition };
+/**
+ * 从简历原文中回退提取求职意向。
+ * 模型漏填 target_position、或只按中文标签返回时使用，避免「求职意向」整行丢失。
+ */
+function extractTargetPositionFromText(text = '') {
+  const source = String(text || '');
+  if (!source.trim()) return '';
+  const match = source.match(
+    /(?:求职意向|意向岗位|目标岗位|期望岗位|求职岗位|应聘岗位|意向职位)\s*[:：]\s*([^\n，,；;]+)/,
+  );
+  return match ? String(match[1] || '').trim() : '';
+}
+
+module.exports = { hasResumeContent, extractTargetPosition, extractTargetPositionFromText };

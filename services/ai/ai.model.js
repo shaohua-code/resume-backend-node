@@ -164,12 +164,17 @@ function buildLegacyRuntime(task, requestedModel = '') {
  */
 function resolveDeepseekFallbackConfig(task) {
   const modelKey = getLegacyModelKey(task);
-  return toRuntime({
+  const runtime = toRuntime({
     model_key: modelKey,
     name: modelKey,
     provider: 'deepseek',
     model_type: getTaskDefinition(task)?.required_model_type || AI_MODEL_TYPE.TEXT,
   });
+  // DeepSeek V4 默认开思考；识别兜底强制关闭，避免思考占满 max_tokens 导致 JSON 截断
+  if (task === AI_TASK.RESUME_EXTRACT) {
+    runtime.thinkingEnabled = false;
+  }
+  return runtime;
 }
 
 async function findEnabledModelByKey(modelKey) {
@@ -195,14 +200,31 @@ async function findModelById(modelId) {
   return model;
 }
 
-async function findTaskModel(task) {
+/**
+ * 读取后台任务模型绑定（含任务级 thinking_enabled）。
+ * @returns {Promise<{ model: object, thinking_enabled: boolean|null }|null>}
+ */
+async function findTaskModelBinding(task) {
   const { data: assignment, error } = await dbAdmin
     .from('ai_task_model')
     .select('*')
     .eq('task_type', task)
     .maybeSingle();
   if (error || !assignment) return null;
-  return findModelById(assignment.model_id);
+  const model = await findModelById(assignment.model_id);
+  if (!model) return null;
+  return {
+    model,
+    thinking_enabled: typeof assignment.thinking_enabled === 'boolean'
+      ? assignment.thinking_enabled
+      : null,
+  };
+}
+
+/** 兼容旧调用：仅返回模型行 */
+async function findTaskModel(task) {
+  const binding = await findTaskModelBinding(task);
+  return binding?.model || null;
 }
 
 /** 用户级任务模型覆盖（需开关开启且模型仍启用、类型匹配） */
@@ -223,11 +245,21 @@ async function findUserTaskModel(userId, task) {
 /**
  * 解析任务实际使用的模型、供应商、地址与密钥。
  * 优先级：用户覆盖（开关开启）> 后台任务映射 > 接口显式模型 > 环境变量回退。
+ * 深度思考：任务级 thinking_enabled（非 null）> 模型级 thinking_enabled > 供应商默认。
  */
 async function resolveModelConfig(task, requestedModel = '', userId = '') {
   const taskDefinition = getTaskDefinition(task);
   let model = await findUserTaskModel(userId, task);
-  if (!model) model = await findTaskModel(task);
+  let taskThinkingEnabled = null;
+
+  if (!model) {
+    const binding = await findTaskModelBinding(task);
+    if (binding) {
+      model = binding.model;
+      taskThinkingEnabled = binding.thinking_enabled;
+    }
+  }
+
   if (!model && requestedModel && String(requestedModel).trim()) {
     model = await findEnabledModelByKey(String(requestedModel).trim());
   }
@@ -236,6 +268,10 @@ async function resolveModelConfig(task, requestedModel = '', userId = '') {
   }
 
   const runtime = toRuntime(model);
+  // 任务级开关优先于模型默认，仅 boolean 时覆盖
+  if (typeof taskThinkingEnabled === 'boolean') {
+    runtime.thinkingEnabled = taskThinkingEnabled;
+  }
   if (taskDefinition && runtime.modelType !== taskDefinition.required_model_type) {
     const err = new Error(`任务 ${taskDefinition.name} 需要${taskDefinition.required_model_type === AI_MODEL_TYPE.VISION ? '视觉' : '文本'}模型`);
     err.code = 'MODEL_TYPE_MISMATCH';

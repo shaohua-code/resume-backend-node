@@ -355,7 +355,15 @@ async function upsertTaskPrompt(req, res) {
 
 async function updateTaskModel(req, res) {
   try {
-    const data = await aiModelService.updateTaskModel(req, req.params.taskType, req.body?.model_id);
+    // 同步保存任务模型与任务级深度思考开关
+    const data = await aiModelService.updateTaskModel(
+      req,
+      req.params.taskType,
+      req.body?.model_id,
+      Object.prototype.hasOwnProperty.call(req.body || {}, 'thinking_enabled')
+        ? req.body.thinking_enabled
+        : undefined,
+    );
     return res.json({ success: true, data, message: '任务模型已更新' });
   } catch (err) {
     return handleError(res, err);

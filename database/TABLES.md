@@ -128,7 +128,7 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | 项 | 说明 |
 |---|---|
 | 主键 | `id` (BIGSERIAL) |
-| 核心字段 | `task_type`（唯一）、`required_model_type`、`model_id` |
+| 核心字段 | `task_type`（唯一）、`required_model_type`、`model_id`、`thinking_enabled`（NULL=沿用模型；true/false=任务级覆盖） |
 | 关联 | `model_id` → `ai_model.id`（RESTRICT） |
 | 代码路径 | `services/ai/ai.model.js`、`services/admin/admin.aiModel.service.js` |
 

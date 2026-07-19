@@ -208,6 +208,10 @@ async function listTaskModels() {
     return {
       ...task,
       model_id: assignment?.model_id || null,
+      // 任务级深度思考：null=沿用模型配置
+      thinking_enabled: Object.prototype.hasOwnProperty.call(assignment || {}, 'thinking_enabled')
+        ? assignment.thinking_enabled
+        : null,
       model: assignment ? modelMap[String(assignment.model_id)] || null : null,
       update_time: assignment?.update_time || null,
     };
@@ -215,7 +219,14 @@ async function listTaskModels() {
   return { items, models };
 }
 
-async function updateTaskModel(req, taskType, modelId) {
+/** 规范化任务级 thinking_enabled：null=沿用模型，true/false=强制开关 */
+function normalizeTaskThinkingEnabled(value) {
+  if (value === undefined) return undefined;
+  if (value === null || value === '' || value === 'default') return null;
+  return Boolean(value);
+}
+
+async function updateTaskModel(req, taskType, modelId, thinkingEnabled) {
   const task = AI_TASK_CATALOG.find((item) => item.task_type === taskType);
   if (!task) throw badRequest('不支持的 AI 任务类型');
   if (!Number.isInteger(Number(modelId)) || Number(modelId) <= 0) throw badRequest('请选择有效模型');
@@ -231,14 +242,21 @@ async function updateTaskModel(req, taskType, modelId) {
   }
 
   const now = new Date().toISOString();
+  const payload = {
+    task_type: task.task_type,
+    required_model_type: task.required_model_type,
+    model_id: model.id,
+    update_time: now,
+  };
+  // 仅当请求体显式携带时才更新，避免旧客户端误清空
+  const normalizedThinking = normalizeTaskThinkingEnabled(thinkingEnabled);
+  if (normalizedThinking !== undefined) {
+    payload.thinking_enabled = normalizedThinking;
+  }
+
   const { data, error: saveError } = await dbAdmin
     .from('ai_task_model')
-    .upsert({
-      task_type: task.task_type,
-      required_model_type: task.required_model_type,
-      model_id: model.id,
-      update_time: now,
-    }, { onConflict: 'task_type' })
+    .upsert(payload, { onConflict: 'task_type' })
     .select()
     .single();
   if (saveError) throw Object.assign(new Error(`保存任务模型失败：${saveError.message}`), { statusCode: 500 });

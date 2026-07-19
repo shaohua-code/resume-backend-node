@@ -10,6 +10,7 @@
  */
 
 const axios = require('axios');
+const { StringDecoder } = require('string_decoder');
 const { calcAiCost, normalizeUsage } = require('../../utils/ai_cost');
 const { extractJson, extractJsonSafe } = require('../../utils/extractJson');
 const {
@@ -18,7 +19,11 @@ const {
   resolveDeepseekFallbackConfig,
 } = require('./ai.model');
 const { withDeepseekFallback } = require('./ai.fallback');
-const { hasResumeContent, extractTargetPosition } = require('./resume-content');
+const {
+  hasResumeContent,
+  extractTargetPosition,
+  extractTargetPositionFromText,
+} = require('./resume-content');
 const { JD_IMAGE_EXTRACT_PROMPT } = require('./ai.prompts');
 const { resolveFormattedPrompt } = require('./ai.promptResolve');
 
@@ -57,19 +62,36 @@ function assertRuntimeConfig(runtime) {
   }
 }
 
+/**
+ * 按供应商写入深度思考开关。
+ * DeepSeek V4 默认开启思考，必须用 thinking.type；enable_thinking 对其无效。
+ * DashScope 等兼容接口继续使用 enable_thinking。
+ */
 function applyRuntimeOptions(payload, runtime) {
-  // Nullable switch: null keeps provider defaults, boolean explicitly controls thinking mode.
-  if (typeof runtime.thinkingEnabled === 'boolean') {
+  if (typeof runtime.thinkingEnabled !== 'boolean') return payload;
+  const provider = String(runtime.provider || '').trim().toLowerCase();
+  if (provider === 'deepseek') {
+    payload.thinking = { type: runtime.thinkingEnabled ? 'enabled' : 'disabled' };
+  } else {
     payload.enable_thinking = runtime.thinkingEnabled;
   }
   return payload;
+}
+
+/** 从调用 options 提取温度、max_tokens、JSON 模式等可选参数 */
+function pickCallOptions(options = {}) {
+  const callOptions = {};
+  if (typeof options.temperature === 'number') callOptions.temperature = options.temperature;
+  if (typeof options.max_tokens === 'number') callOptions.max_tokens = options.max_tokens;
+  if (options.responseFormat) callOptions.responseFormat = options.responseFormat;
+  return callOptions;
 }
 
 /**
  * OpenAI Chat Completions 兼容接口通用方法（历史函数名保留为内部兼容）。
  * @returns {Promise<{ content: string, usage: object, model: string, cost: number }>}
  */
-async function callChatCompletion(prompt, runtime) {
+async function callChatCompletion(prompt, runtime, callOptions = {}) {
   assertRuntimeConfig(runtime);
   const headers = {
     Authorization: `Bearer ${runtime.apiKey}`,
@@ -79,9 +101,12 @@ async function callChatCompletion(prompt, runtime) {
   const payload = {
     model,
     messages: [{ role: 'user', content: prompt }],
-    temperature: 0.7,
-    max_tokens: 4096,
+    temperature: typeof callOptions.temperature === 'number' ? callOptions.temperature : 0.7,
+    max_tokens: typeof callOptions.max_tokens === 'number' ? callOptions.max_tokens : 4096,
   };
+  if (callOptions.responseFormat) {
+    payload.response_format = callOptions.responseFormat;
+  }
   applyRuntimeOptions(payload, runtime);
   const response = await axios.post(runtime.apiUrl, payload, {
     headers,
@@ -89,8 +114,10 @@ async function callChatCompletion(prompt, runtime) {
   });
   const usage = normalizeUsage(response.data.usage || {});
   const cost = await calcAiCost(model, usage);
+  // 只取最终回答；思考过程在 reasoning_content，不能参与 JSON 解析
+  const message = response.data.choices?.[0]?.message || {};
   return {
-    content: response.data.choices[0].message.content,
+    content: message.content || '',
     usage,
     model,
     cost,
@@ -98,22 +125,70 @@ async function callChatCompletion(prompt, runtime) {
 }
 
 async function callDeepseek(prompt, options = {}) {
+  const callOptions = pickCallOptions(options);
   return withDeepseekFallback(
     options.task,
     async () => {
       // 传入 userId 以应用用户级任务模型覆盖（开关关闭时自动忽略）
       const runtime = await resolveModelConfig(options.task, options.model, options.userId);
-      return callChatCompletion(prompt, runtime);
+      return callChatCompletion(prompt, runtime, callOptions);
     },
-    () => callChatCompletion(prompt, resolveDeepseekFallbackConfig(options.task)),
+    () => callChatCompletion(prompt, resolveDeepseekFallbackConfig(options.task), callOptions),
   );
+}
+
+/**
+ * 安全消费上游 SSE：用 StringDecoder 拼接跨 TCP 包的多字节 UTF-8，
+ * 避免 chunk.toString() 把中文截成「」。
+ */
+function consumeChatCompletionSse(responseStream, onChunk) {
+  return new Promise((resolve, reject) => {
+    const decoder = new StringDecoder('utf8');
+    let full = '';
+    let remainder = '';
+    let usage = {};
+
+    const handleSseLine = (line) => {
+      const trimmed = String(line || '').trim();
+      if (!trimmed.startsWith('data:')) return;
+      const data = trimmed.slice(5).trim();
+      if (!data || data === '[DONE]') return;
+      try {
+        const parsed = JSON.parse(data);
+        if (parsed.usage) usage = parsed.usage;
+        // 忽略 reasoning_content，避免思考过程污染结构化 JSON
+        const content = parsed.choices?.[0]?.delta?.content || '';
+        if (content) {
+          full += content;
+          if (typeof onChunk === 'function') onChunk(content, full);
+        }
+      } catch (e) {
+        /* ignore partial json */
+      }
+    };
+
+    responseStream.on('data', (chunk) => {
+      remainder += decoder.write(chunk);
+      const lines = remainder.split('\n');
+      remainder = lines.pop() || '';
+      for (const line of lines) handleSseLine(line);
+    });
+
+    responseStream.on('end', () => {
+      // 冲刷解码器中未完成的多字节字符，并处理最后半行
+      remainder += decoder.end();
+      if (remainder.trim()) handleSseLine(remainder);
+      resolve({ content: full, usage });
+    });
+    responseStream.on('error', reject);
+  });
 }
 
 /**
  * 流式调用 OpenAI 兼容接口，通过 onChunk 回调推送增量文本。
  * @returns {Promise<{ content: string, usage: object, model: string, cost: number }>}
  */
-async function callChatCompletionStream(prompt, runtime, onChunk) {
+async function callChatCompletionStream(prompt, runtime, onChunk, callOptions = {}) {
   assertRuntimeConfig(runtime);
   const headers = {
     Authorization: `Bearer ${runtime.apiKey}`,
@@ -123,11 +198,14 @@ async function callChatCompletionStream(prompt, runtime, onChunk) {
   const payload = {
     model,
     messages: [{ role: 'user', content: prompt }],
-    temperature: 0.7,
-    max_tokens: 4096,
+    temperature: typeof callOptions.temperature === 'number' ? callOptions.temperature : 0.7,
+    max_tokens: typeof callOptions.max_tokens === 'number' ? callOptions.max_tokens : 4096,
     stream: true,
     stream_options: { include_usage: true },
   };
+  if (callOptions.responseFormat) {
+    payload.response_format = callOptions.responseFormat;
+  }
   applyRuntimeOptions(payload, runtime);
   const response = await axios.post(runtime.apiUrl, payload, {
     headers,
@@ -135,42 +213,9 @@ async function callChatCompletionStream(prompt, runtime, onChunk) {
     responseType: 'stream',
   });
 
-  return new Promise((resolve, reject) => {
-    let full = '';
-    let remainder = '';
-    let usage = {};
-
-    response.data.on('data', (chunk) => {
-      remainder += chunk.toString();
-      const lines = remainder.split('\n');
-      remainder = lines.pop() || '';
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) continue;
-        const data = trimmed.slice(5).trim();
-        if (data === '[DONE]') continue;
-        try {
-          const parsed = JSON.parse(data);
-          if (parsed.usage) {
-            usage = parsed.usage;
-          }
-          const content = parsed.choices?.[0]?.delta?.content || '';
-          if (content) {
-            full += content;
-            if (typeof onChunk === 'function') onChunk(content, full);
-          }
-        } catch (e) {
-          /* ignore partial json */
-        }
-      }
-    });
-
-    response.data.on('end', async () => {
-      const meta = await buildMeta(model, usage);
-      resolve({ content: full, ...meta });
-    });
-    response.data.on('error', reject);
-  });
+  const { content, usage } = await consumeChatCompletionSse(response.data, onChunk);
+  const meta = await buildMeta(model, usage);
+  return { content, ...meta };
 }
 
 async function callDeepseekStream(prompt, options = {}, onChunk) {
@@ -179,17 +224,19 @@ async function callDeepseekStream(prompt, options = {}, onChunk) {
     primaryEmittedContent = true;
     if (typeof onChunk === 'function') onChunk(chunk, full);
   };
+  const callOptions = pickCallOptions(options);
 
   return withDeepseekFallback(
     options.task,
     async () => {
       const runtime = await resolveModelConfig(options.task, options.model, options.userId);
-      return callChatCompletionStream(prompt, runtime, handlePrimaryChunk);
+      return callChatCompletionStream(prompt, runtime, handlePrimaryChunk, callOptions);
     },
     () => callChatCompletionStream(
       prompt,
       resolveDeepseekFallbackConfig(options.task),
       onChunk,
+      callOptions,
     ),
     {
       // 已推送的半截内容无法从 SSE 客户端撤回；此时禁止拼接第二份流，
@@ -252,13 +299,25 @@ function joinTechStack(techStack) {
 }
 
 function normalizeEducationItem(item = {}) {
+  // degree 只接受字符串，避免 education[] 误入扁平字段后污染
+  const rawDegree = item.degree || item.education || '';
+  let degree = typeof rawDegree === 'string' ? rawDegree : '';
+  let major = item.major || '';
+  // 仅单段专业（无换行/分号/斜杠拼接）时，从「通信技术（大专）」拆出学历
+  if (major && !degree && !/[\n；;]|\s+\/\s+/.test(major)) {
+    const parsed = splitMajorAndDegree(major);
+    if (parsed.degree) {
+      major = parsed.major;
+      degree = parsed.degree;
+    }
+  }
   return {
-    school: item.school || '',
-    major: item.major || '',
+    school: item.school || item.school_name || item.schoolName || '',
+    major,
     main_course: item.main_course || item.mainCourse || '',
-    degree: item.degree || item.education || '',
-    start_date: item.start_date || '',
-    end_date: item.end_date || '',
+    degree,
+    start_date: item.start_date || item.startDate || '',
+    end_date: item.end_date || item.endDate || '',
   };
 }
 
@@ -270,30 +329,179 @@ function normalizeCustomField(item = {}) {
 }
 
 /**
+ * 把技能/证书等列表项安全转成可读字符串。
+ * 禁止对对象直接 String()，否则会变成 [object Object]。
+ */
+function stringifyListItem(item) {
+  if (item === undefined || item === null) return '';
+  if (typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean') {
+    return String(item).trim();
+  }
+  if (typeof item === 'object') {
+    const text = (
+      item.name
+      || item.title
+      || item.label
+      || item.skill
+      || item.certificate
+      || item.award
+      || item.value
+      || item.text
+      || item.content
+      || ''
+    );
+    if (text) return String(text).trim();
+    const values = Object.values(item).filter((v) => typeof v === 'string' || typeof v === 'number');
+    if (values.length === 1) return String(values[0]).trim();
+  }
+  return '';
+}
+
+/** 将字符串或数组统一为去空字符串数组。 */
+function normalizeStringList(value) {
+  if (Array.isArray(value)) {
+    return value.map(stringifyListItem).filter(Boolean);
+  }
+  if (!value) return [];
+  if (typeof value === 'object') {
+    const text = stringifyListItem(value);
+    return text ? [text] : [];
+  }
+  return String(value).split(/[\n,，、]/).map((item) => item.trim()).filter(Boolean);
+}
+
+/** 拆分被模型错误合并进同一字段的多段教育信息。 */
+function splitEducationField(value) {
+  const text = String(value || '').trim();
+  if (!text) return [];
+  const parts = text
+    .split(/\n+|；|;|\s+\/\s+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return parts.length ? parts : [text];
+}
+
+/** 从「通信技术（大专）」这类文案中拆出专业与学历。 */
+function splitMajorAndDegree(text = '') {
+  const raw = String(text || '').trim();
+  if (!raw) return { major: '', degree: '' };
+  const match = raw.match(/^(.+?)[（(]\s*(大专|本科|硕士|博士|研究生|专科|高中|中专)\s*[）)]$/);
+  if (match) {
+    return { major: match[1].trim(), degree: match[2].trim() };
+  }
+  return { major: raw, degree: '' };
+}
+
+/**
+ * 从「学校A 专业（大专） 学校B 专业（本科）」这类粘连文本中尽量拆成多段。
+ */
+function splitStickyEducationText(text = '') {
+  const raw = String(text || '').trim();
+  if (!raw) return [];
+  const schoolHits = raw.match(/[\u4e00-\u9fa5A-Za-z0-9（）()]{2,}(?:大学|学院|学校|职业技术学院|职业技术大学)/g) || [];
+  if (schoolHits.length < 2) return [];
+
+  const parts = [];
+  let cursor = 0;
+  schoolHits.forEach((school, index) => {
+    const start = raw.indexOf(school, cursor);
+    if (start < 0) return;
+    const nextSchool = schoolHits[index + 1];
+    const end = nextSchool ? raw.indexOf(nextSchool, start + school.length) : raw.length;
+    const chunk = raw.slice(start, end >= 0 ? end : raw.length).trim();
+    const rest = chunk.slice(school.length).trim().replace(/^[,，、|｜\-\s]+/, '');
+    const parsed = splitMajorAndDegree(rest);
+    parts.push({
+      school,
+      major: parsed.major,
+      degree: parsed.degree,
+    });
+    cursor = start + school.length;
+  });
+  return parts;
+}
+
+/** 把合并的一条教育记录尽量拆成多条。 */
+function expandMergedEducationItems(list = []) {
+  const result = [];
+  list.forEach((item) => {
+    const schools = splitEducationField(item.school);
+    const majors = splitEducationField(item.major);
+    const degrees = splitEducationField(item.degree);
+    const startDates = splitEducationField(item.start_date);
+    const endDates = splitEducationField(item.end_date);
+    const courses = splitEducationField(item.main_course);
+
+    if (schools.length > 1) {
+      schools.forEach((school, index) => {
+        const majorSource = majors[index] || '';
+        const parsed = splitMajorAndDegree(majorSource);
+        result.push({
+          school,
+          major: parsed.major || majorSource,
+          degree: degrees[index] || parsed.degree || '',
+          start_date: startDates[index] || (index === 0 ? item.start_date : '') || '',
+          end_date: endDates[index] || (index === 0 ? item.end_date : '') || '',
+          main_course: courses[index] || '',
+        });
+      });
+      return;
+    }
+
+    // 注意：[] 在 JS 中为真值，不能用 || 串联
+    const stickyFromSchool = splitStickyEducationText(item.school);
+    const sticky = stickyFromSchool.length > 1
+      ? stickyFromSchool
+      : splitStickyEducationText([item.school, item.major].filter(Boolean).join(' '));
+    if (sticky.length > 1) {
+      sticky.forEach((part, index) => {
+        result.push({
+          school: part.school,
+          major: part.major || majors[index] || '',
+          degree: part.degree || degrees[index] || '',
+          start_date: startDates[index] || (index === 0 ? item.start_date : '') || '',
+          end_date: endDates[index] || (index === 0 ? item.end_date : '') || '',
+          main_course: courses[index] || '',
+        });
+      });
+      return;
+    }
+
+    result.push(item);
+  });
+  return result;
+}
+
+/**
  * 归一化教育背景数组，兼容 educations[] / education[] 与扁平 school/major/education
  */
 function normalizeEducations(source = {}) {
-  const list = source.educations || source.education_list || [];
-
-  if (Array.isArray(list) && list.length) {
-    return list
-      .map(normalizeEducationItem)
-      .filter((item) => item.school || item.major || item.main_course || item.degree || item.start_date || item.end_date);
+  let list = [];
+  if (Array.isArray(source.educations) && source.educations.length) {
+    list = source.educations;
+  } else if (Array.isArray(source.education_list) && source.education_list.length) {
+    list = source.education_list;
+  } else if (Array.isArray(source.education) && source.education.length) {
+    list = source.education;
   }
 
-  if (Array.isArray(source.education) && source.education.length) {
-    return source.education
+  if (list.length) {
+    const normalized = list
       .map(normalizeEducationItem)
       .filter((item) => item.school || item.major || item.main_course || item.degree || item.start_date || item.end_date);
+    return expandMergedEducationItems(normalized);
   }
 
-  if (source.school || source.major || source.main_course || source.mainCourse || source.education || source.degree) {
-    return [normalizeEducationItem({
+  const flatEducation = typeof source.education === 'string' ? source.education : '';
+  if (source.school || source.major || source.main_course || source.mainCourse || flatEducation || source.degree) {
+    return expandMergedEducationItems([normalizeEducationItem({
       school: source.school,
       major: source.major,
       main_course: source.main_course || source.mainCourse,
-      degree: source.education || source.degree,
-    })];
+      degree: flatEducation || source.degree,
+      start_date: source.start_date,
+      end_date: source.end_date,
+    })]);
   }
 
   return [];
@@ -318,15 +526,35 @@ function normalizeEducation(education) {
   return { degree: typeof education === 'string' ? education : '' };
 }
 
-function normalizeProject(project) {
+function normalizeProject(project = {}) {
+  // 兼容 title / project_name / content 等模型别名
   return {
-    name: project.name || '',
-    role: project.role || '',
-    description: project.description || '',
-    tech_stack: joinTechStack(project.tech_stack),
-    start_date: project.start_date || '',
-    end_date: project.end_date || '',
+    name: project.name || project.project_name || project.projectName || project.title || '',
+    role: project.role || project.position || '',
+    description: project.description || project.content || project.desc || '',
+    tech_stack: joinTechStack(project.tech_stack || project.skills || project.techStack),
+    start_date: project.start_date || project.startDate || '',
+    end_date: project.end_date || project.endDate || '',
   };
+}
+
+/** 从多种字段名中取出项目数组。 */
+function pickProjectList(source = {}) {
+  const candidates = [
+    source.projects,
+    source.project_experiences,
+    source.projectExperiences,
+    source.project_list,
+    source.projectList,
+  ];
+  for (const list of candidates) {
+    if (Array.isArray(list) && list.length) return list;
+  }
+  // 整段项目被写成字符串时降级为单条，避免静默丢弃
+  if (typeof source.projects === 'string' && source.projects.trim()) {
+    return [{ description: source.projects.trim() }];
+  }
+  return [];
 }
 
 function normalizeInternship(internship) {
@@ -366,9 +594,12 @@ function normalizePdfResume(data, options = {}) {
     school: source.school || firstEdu.school || '',
     major: source.major || firstEdu.major || '',
     main_course: source.main_course || source.mainCourse || firstEdu.main_course || '',
-    education: source.education || firstEdu.degree || source.degree || '',
-    skills: Array.isArray(source.skills) ? source.skills.filter(Boolean) : [],
-    projects: Array.isArray(source.projects) ? source.projects.map(normalizeProject) : [],
+    // 扁平 education 仅同步学历字符串，避免数组残留
+    education: (typeof source.education === 'string' ? source.education : '') || firstEdu.degree || source.degree || '',
+    skills: normalizeStringList(source.skills),
+    projects: pickProjectList(source)
+      .map(normalizeProject)
+      .filter((item) => item.name || item.role || item.description || item.tech_stack || item.start_date || item.end_date),
     internships: Array.isArray(source.internships) ? source.internships.map(normalizeInternship) : [],
     // 工作经历（正式全职工作，区别于实习）
     work_experiences: Array.isArray(source.work_experiences)
@@ -381,8 +612,8 @@ function normalizePdfResume(data, options = {}) {
           end_date: w.end_date || '',
         }))
       : [],
-    awards: Array.isArray(source.awards) ? source.awards.filter(Boolean) : [],
-    certificates: Array.isArray(source.certificates) ? source.certificates.filter(Boolean) : [],
+    awards: normalizeStringList(source.awards),
+    certificates: normalizeStringList(source.certificates),
   };
 }
 
@@ -499,9 +730,15 @@ async function extractResumeFromTextStream(resumeText, options = {}, onChunk) {
   const prompt = await buildTaskPrompt(AI_TASK.RESUME_EXTRACT, {
     resume_source: sourceText,
   }, options);
+  // 识别任务要稳定 JSON：低温 + 足够输出窗口 + JSON 模式
   const { content, usage, model, cost } = await callDeepseekStream(
     prompt,
-    modelCallOptions(AI_TASK.RESUME_EXTRACT, options),
+    {
+      ...modelCallOptions(AI_TASK.RESUME_EXTRACT, options),
+      temperature: 0.2,
+      max_tokens: 8192,
+      responseFormat: { type: 'json_object' },
+    },
     onChunk,
   );
   // 区分解析失败与合法空结果，避免 JSON 瑕疵被误报成“无简历信息”。
@@ -509,6 +746,8 @@ async function extractResumeFromTextStream(resumeText, options = {}, onChunk) {
   if (!ok) {
     const err = new Error('AI 返回内容无法解析为结构化简历，请重试');
     err.code = 'RESUME_JSON_PARSE_FAILED';
+    // 便于排查：记录截断预览，避免把整份简历打进日志
+    err.detail = String(content || '').slice(0, 240);
     throw err;
   }
   if (!parsed || Object.keys(parsed).length === 0) {
@@ -517,6 +756,10 @@ async function extractResumeFromTextStream(resumeText, options = {}, onChunk) {
 
   // 禁止把模型偶尔返回的当前职位 position/job_title 推断成用户求职意向。
   const resume = normalizePdfResume(parsed, { strictTargetPosition: true });
+  // 模型漏提「求职意向」时，从原文标签行回填，避免示例与真实简历都丢岗位
+  if (!resume.target_position) {
+    resume.target_position = extractTargetPositionFromText(sourceText);
+  }
   return {
     data: { resume: hasResumeContent(resume) ? resume : {} },
     meta: { model, usage, cost },
@@ -705,42 +948,10 @@ async function callDeepseekVisionStream(imageBuffer, mimeType, textPrompt, optio
     responseType: 'stream',
   });
 
-  return new Promise((resolve, reject) => {
-    let full = '';
-    let remainder = '';
-    let usage = {};
-
-    response.data.on('data', (chunk) => {
-      remainder += chunk.toString();
-      const lines = remainder.split('\n');
-      remainder = lines.pop() || '';
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) continue;
-        const data = trimmed.slice(5).trim();
-        if (data === '[DONE]') continue;
-        try {
-          const parsed = JSON.parse(data);
-          if (parsed.usage) {
-            usage = parsed.usage;
-          }
-          const content = parsed.choices?.[0]?.delta?.content || '';
-          if (content) {
-            full += content;
-            if (typeof onChunk === 'function') onChunk(content, full);
-          }
-        } catch (e) {
-          /* ignore partial json */
-        }
-      }
-    });
-
-    response.data.on('end', async () => {
-      const meta = await buildMeta(model, usage);
-      resolve({ content: full, ...meta });
-    });
-    response.data.on('error', reject);
-  });
+  // 与文本流共用安全解码，避免视觉流中文同样被截成乱码
+  const { content, usage } = await consumeChatCompletionSse(response.data, onChunk);
+  const meta = await buildMeta(model, usage);
+  return { content, ...meta };
 }
 
 function parseScorePayload(content) {

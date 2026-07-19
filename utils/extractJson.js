@@ -5,9 +5,14 @@
  * extractJsonSafe 可区分「解析失败」与「合法空对象」。
  */
 
-/** 去掉 ```json ... ``` 或 ``` ... ``` 包裹，只保留内部文本。 */
+/** 去掉思考标签与 markdown 代码块，只保留可解析文本。 */
 function stripMarkdownFence(text) {
-  const raw = String(text || '').trim()
+  let raw = String(text || '').trim()
+  // 部分模型会把思考过程包进 think / reasoning 标签
+  raw = raw
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, '')
+    .trim()
   const fenced = raw.match(/^```(?:json|JSON)?\s*\r?\n?([\s\S]*?)\r?\n?```\s*$/)
   if (fenced) return fenced[1].trim()
   // 模型偶发在前后夹杂说明文字，仍尝试剥离首个代码块。

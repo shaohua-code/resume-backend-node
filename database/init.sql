@@ -232,9 +232,15 @@ CREATE TABLE IF NOT EXISTS public.ai_task_model (
   task_type           TEXT UNIQUE NOT NULL,
   required_model_type TEXT NOT NULL DEFAULT 'text',
   model_id            BIGINT NOT NULL REFERENCES public.ai_model(id) ON DELETE RESTRICT,
+  -- NULL=沿用模型配置；true/false=本任务强制开启/关闭深度思考
+  thinking_enabled    BOOLEAN DEFAULT NULL,
   create_time         TIMESTAMPTZ DEFAULT now(),
   update_time         TIMESTAMPTZ DEFAULT now()
 );
+
+-- 已有库补齐任务级深度思考开关
+ALTER TABLE public.ai_task_model
+  ADD COLUMN IF NOT EXISTS thinking_enabled BOOLEAN DEFAULT NULL;
 
 -- ========== 6. 系统配置 ==========
 
