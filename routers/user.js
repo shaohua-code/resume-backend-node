@@ -1,5 +1,5 @@
 /**
- * 登录用户配置路由（模型选择 / 提示词指令）
+ * 登录用户配置路由（资料 / 模型选择 / 提示词指令）
  */
 
 const express = require('express')
@@ -9,6 +9,10 @@ const userController = require('../controllers/user.controller')
 const router = express.Router()
 
 router.use(authRequired)
+
+router.get('/profile', userController.getProfile)
+router.patch('/profile', userController.updateProfile)
+router.post('/password', userController.changePassword)
 
 router.get('/task-models', userController.listTaskModels)
 router.put('/task-models/:taskType', userController.saveTaskModel)
