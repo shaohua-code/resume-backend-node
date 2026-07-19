@@ -6,6 +6,7 @@
 const walletService = require('../services/wallet/wallet.service')
 const rechargeService = require('../services/admin/admin.recharge.service')
 const rechargeRequestService = require('../services/admin/admin.rechargeRequest.service')
+const { handleError } = require('../utils/response')
 
 /**
  * 解析分页参数
@@ -15,10 +16,6 @@ function parsePagination(req) {
   const page = Math.max(parseInt(req.query.page || '1', 10), 1)
   const size = Math.min(Math.max(parseInt(req.query.size || '10', 10), 1), 100)
   return { page, size }
-}
-
-function handleError(res, err) {
-  return res.status(err.statusCode || 500).json({ detail: err.message, code: err.code })
 }
 
 /**

@@ -6,7 +6,7 @@
 const aiService = require('../services/ai/ai.service');
 const resumeRepo = require('../repositories/resume.repository');
 const { ensureAiQuota, recordAiCall } = require('../services/ai/ai.quota.service');
-const { success, error } = require('../utils/response');
+const { success, error, sanitizePublicError } = require('../utils/response');
 const multer = require('multer');
 
 // JD 图片 OCR：内存存储，不落盘
@@ -67,12 +67,14 @@ function respondAiError(res, e, { sendEvent, recordFn } = {}) {
     return error(res, e.statusCode || 400, e.message, { code: e.code });
   }
 
-  const msg = `AI服务调用失败：${e.message}`;
+  // 500 类错误统一脱敏，避免把模型/驱动原文推到 SSE 或 JSON
+  const statusCode = e.statusCode || 500;
+  const msg = sanitizePublicError(statusCode, e.message || 'AI 服务暂时不可用，请稍后重试');
   if (sendEvent) {
-    sendEvent({ error: msg });
+    sendEvent({ error: msg, code: e.code });
     return res.end();
   }
-  return error(res, e.statusCode || 500, msg);
+  return error(res, statusCode, msg, e.code ? { code: e.code } : {});
 }
 
 async function getResumeJson(req, resumeId) {

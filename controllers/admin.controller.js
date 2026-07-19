@@ -17,6 +17,7 @@ const inviteService = require('../services/admin/admin.invite.service');
 const visitService = require('../services/admin/admin.visit.service');
 const rechargeService = require('../services/admin/admin.recharge.service');
 const rechargeRequestService = require('../services/admin/admin.rechargeRequest.service');
+const { handleError } = require('../utils/response');
 
 /**
  * 解析分页参数
@@ -27,16 +28,6 @@ function parsePagination(req) {
   const page = Math.max(parseInt(req.query.page || '1', 10), 1);
   const size = Math.min(Math.max(parseInt(req.query.size || '10', 10), 1), 100);
   return { page, size, from: (page - 1) * size, to: page * size - 1 };
-}
-
-/**
- * 统一错误响应
- * @param {Object} res - Express 响应对象
- * @param {Error} err - 错误对象
- * @returns {Object} Express 响应
- */
-function handleError(res, err) {
-  return res.status(err.statusCode || 500).json({ detail: err.message });
 }
 
 /**

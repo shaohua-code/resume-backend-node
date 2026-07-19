@@ -3,10 +3,7 @@
  */
 
 const visitService = require('../services/visit/visit.service')
-
-function handleError(res, err) {
-  return res.status(err.statusCode || 500).json({ detail: err.message })
-}
+const { handleError } = require('../utils/response')
 
 async function createVisit(req, res) {
   try {
