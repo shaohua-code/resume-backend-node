@@ -5,6 +5,7 @@
 
 const { settings } = require('../../config');
 const { dbAdmin } = require('../../dbClient');
+const { isUserModelCustomizationEnabled } = require('./ai.featureFlags');
 
 const AI_MODEL_TYPE = {
   TEXT: 'text',
@@ -166,6 +167,18 @@ async function findEnabledModelByKey(modelKey) {
   return data || null;
 }
 
+async function findModelById(modelId) {
+  if (!modelId) return null;
+  const { data: model, error } = await dbAdmin
+    .from('ai_model')
+    .select('*')
+    .eq('id', modelId)
+    .eq('enabled', true)
+    .maybeSingle();
+  if (error || !model) return null;
+  return model;
+}
+
 async function findTaskModel(task) {
   const { data: assignment, error } = await dbAdmin
     .from('ai_task_model')
@@ -173,24 +186,32 @@ async function findTaskModel(task) {
     .eq('task_type', task)
     .maybeSingle();
   if (error || !assignment) return null;
+  return findModelById(assignment.model_id);
+}
 
-  const { data: model, error: modelError } = await dbAdmin
-    .from('ai_model')
+/** 用户级任务模型覆盖（需开关开启且模型仍启用、类型匹配） */
+async function findUserTaskModel(userId, task) {
+  if (!userId) return null;
+  const enabled = await isUserModelCustomizationEnabled();
+  if (!enabled) return null;
+  const { data: assignment, error } = await dbAdmin
+    .from('user_ai_task_model')
     .select('*')
-    .eq('id', assignment.model_id)
-    .eq('enabled', true)
+    .eq('user_id', userId)
+    .eq('task_type', task)
     .maybeSingle();
-  if (modelError || !model) return null;
-  return model;
+  if (error || !assignment) return null;
+  return findModelById(assignment.model_id);
 }
 
 /**
  * 解析任务实际使用的模型、供应商、地址与密钥。
- * 优先级：后台任务映射 > 接口显式模型（仅兼容未配置任务） > 环境变量回退。
+ * 优先级：用户覆盖（开关开启）> 后台任务映射 > 接口显式模型 > 环境变量回退。
  */
-async function resolveModelConfig(task, requestedModel = '') {
+async function resolveModelConfig(task, requestedModel = '', userId = '') {
   const taskDefinition = getTaskDefinition(task);
-  let model = await findTaskModel(task);
+  let model = await findUserTaskModel(userId, task);
+  if (!model) model = await findTaskModel(task);
   if (!model && requestedModel && String(requestedModel).trim()) {
     model = await findEnabledModelByKey(String(requestedModel).trim());
   }
@@ -208,8 +229,8 @@ async function resolveModelConfig(task, requestedModel = '') {
   return runtime;
 }
 
-async function resolveModel(task, requestedModel = '') {
-  const runtime = await resolveModelConfig(task, requestedModel);
+async function resolveModel(task, requestedModel = '', userId = '') {
+  const runtime = await resolveModelConfig(task, requestedModel, userId);
   return runtime.modelKey;
 }
 

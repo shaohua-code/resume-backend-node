@@ -70,6 +70,12 @@ router.post('/uploadOptimizeByJd/existing/stream', emailBindingRequired, pdfVali
 router.get('/uploadedFile', pdfController.uploadedFileMeta)
 
 /**
+ * 预览当前用户已上传 PDF 二进制（需登录，inline）
+ * GET /api/pdf/uploadedFile/content
+ */
+router.get('/uploadedFile/content', pdfController.uploadedFileContent)
+
+/**
  * 删除当前用户已上传 PDF
  * DELETE /api/pdf/uploadedFile
  */

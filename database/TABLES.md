@@ -1,12 +1,12 @@
 # 数据库表中文对照
 
-项目共 **22 张表**，建表脚本见 [`init.sql`](init.sql)。
+项目共 **25 张表**，建表脚本见 [`init.sql`](init.sql)。
 
 验证表数量：
 
 ```sql
 SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
--- 预期：22
+-- 预期：25
 ```
 
 ---
@@ -132,6 +132,35 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | 关联 | `model_id` → `ai_model.id`（RESTRICT） |
 | 代码路径 | `services/ai/ai.model.js`、`services/admin/admin.aiModel.service.js` |
 
+### user_ai_task_model — 用户任务模型覆盖表
+
+| 项 | 说明 |
+|---|---|
+| 主键 | `id` (BIGSERIAL) |
+| 核心字段 | `user_id`、`task_type`、`model_id`；`UNIQUE(user_id, task_type)` |
+| 关联 | `user_id` → `users.id`（CASCADE）；`model_id` → `ai_model.id`（RESTRICT） |
+| 说明 | 仅选择管理员已启用模型；需 `user_ai_model_customization.enabled=true`；无覆盖回退 `ai_task_model` |
+| 代码路径 | `services/user/userAiConfig.service.js`、`services/ai/ai.model.js` |
+
+### ai_task_prompt — 管理员默认业务提示词
+
+| 项 | 说明 |
+|---|---|
+| 主键 | `id` (BIGSERIAL) |
+| 核心字段 | `task_type`（唯一）、`instruction` |
+| 说明 | 仅业务指令；JSON Schema/输出格式永不入库，由代码锁定追加 |
+| 代码路径 | `services/user/userAiConfig.service.js`、`services/ai/ai.promptResolve.js` |
+
+### user_ai_task_prompt — 用户业务提示词覆盖
+
+| 项 | 说明 |
+|---|---|
+| 主键 | `id` (BIGSERIAL) |
+| 核心字段 | `user_id`、`task_type`、`instruction`；`UNIQUE(user_id, task_type)` |
+| 关联 | `user_id` → `users.id`（CASCADE） |
+| 说明 | 需 `user_ai_prompt_customization.enabled=true`；回退管理员 → 代码默认 |
+| 代码路径 | `services/user/userAiConfig.service.js`、`services/ai/ai.promptResolve.js` |
+
 ---
 
 ## 6. 系统配置
@@ -142,7 +171,7 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 |---|---|
 | 主键 | `config_key` (TEXT) |
 | 核心字段 | `config_value`（JSONB）、`description` |
-| 常用键 | `register_gift_amount`、`super_admin_total_quota`、`ai_daily_limit` |
+| 常用键 | `register_gift_amount`、`super_admin_total_quota`、`ai_daily_limit`、`user_ai_model_customization`、`user_ai_prompt_customization` |
 | 代码路径 | `repositories/config.repository.js` |
 
 ### announcement — 公告表
@@ -150,8 +179,9 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | 项 | 说明 |
 |---|---|
 | 主键 | `id` (BIGSERIAL) |
-| 核心字段 | `title`、`content`、`enabled` |
-| 代码路径 | `services/admin/admin.crud.service.js`、`services/admin/admin.dashboard.service.js` |
+| 核心字段 | `title`、`content`（Markdown）、`version_label`、`start_at`、`end_at`、`enabled` |
+| 说明 | 登录用户 `GET /api/announcements/active` 取时间窗内启用公告；已读存前端 localStorage |
+| 代码路径 | `services/announcement/announcement.service.js`、`services/admin/admin.crud.service.js` |
 
 ### admin_action_log — 管理员操作日志表
 
@@ -276,8 +306,11 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | `ai_call_record` | AI 调用记录表 | Token 用量与费用 |
 | `ai_model` | AI 模型配置表 | 模型类型、供应商、调用入口、深度思考与 Token 单价 |
 | `ai_task_model` | AI 任务模型映射表 | 每个任务当前使用的模型 |
-| `system_config` | 系统配置表 | 注册赠送额、超管额度池等 |
-| `announcement` | 公告表 | 前台公告 |
+| `user_ai_task_model` | 用户任务模型覆盖 | 用户按任务选择模型 |
+| `ai_task_prompt` | 管理员默认提示词 | 业务指令默认 |
+| `user_ai_task_prompt` | 用户提示词覆盖 | 用户业务指令 |
+| `system_config` | 系统配置表 | 注册赠送额、超管额度池、用户 AI 开关等 |
+| `announcement` | 公告表 | 版本公告（时间窗 + Markdown） |
 | `admin_action_log` | 管理员操作日志 | 审计 |
 | `user_feedback` | 用户反馈表 | 反馈内容 |
 | `user_wallet` | 用户钱包表 | 余额与累计消费 |

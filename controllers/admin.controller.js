@@ -17,6 +17,8 @@ const inviteService = require('../services/admin/admin.invite.service');
 const visitService = require('../services/admin/admin.visit.service');
 const rechargeService = require('../services/admin/admin.recharge.service');
 const rechargeRequestService = require('../services/admin/admin.rechargeRequest.service');
+const announcementService = require('../services/announcement/announcement.service');
+const userAiConfigService = require('../services/user/userAiConfig.service');
 const { handleError } = require('../utils/response');
 
 /**
@@ -217,7 +219,11 @@ function listCrudItems(table) {
 function createCrudItem(table, idColumn = 'id') {
   return async (req, res) => {
     try {
-      const data = await crudService.createItem(req, table, req.body, idColumn);
+      // 公告写入前规范化时间窗与 Markdown 正文，避免脏数据进入前台弹窗
+      const body = table === 'announcement'
+        ? announcementService.sanitizeAnnouncementBody(req.body)
+        : req.body;
+      const data = await crudService.createItem(req, table, body, idColumn);
       return res.json({ success: true, data, message: '创建成功' });
     } catch (err) {
       return handleError(res, err);
@@ -234,7 +240,10 @@ function createCrudItem(table, idColumn = 'id') {
 function updateCrudItem(table, idColumn = 'id') {
   return async (req, res) => {
     try {
-      const data = await crudService.updateItem(req, table, req.params.id, req.body, idColumn);
+      const body = table === 'announcement'
+        ? announcementService.sanitizeAnnouncementBody({ ...req.body, enabled: req.body.enabled })
+        : req.body;
+      const data = await crudService.updateItem(req, table, req.params.id, body, idColumn);
       return res.json({ success: true, data, message: '更新成功' });
     } catch (err) {
       return handleError(res, err);
@@ -322,6 +331,28 @@ async function listTaskModels(req, res) {
 }
 
 /** 切换指定任务的模型，后端强制校验能力类型。 */
+async function listTaskPrompts(req, res) {
+  try {
+    const items = await userAiConfigService.listAdminTaskPrompts();
+    return res.json({ success: true, items });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+async function upsertTaskPrompt(req, res) {
+  try {
+    const data = await userAiConfigService.upsertAdminTaskPrompt(
+      req,
+      req.params.taskType,
+      req.body?.instruction,
+    );
+    return res.json({ success: true, data, message: '提示词已保存' });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
 async function updateTaskModel(req, res) {
   try {
     const data = await aiModelService.updateTaskModel(req, req.params.taskType, req.body?.model_id);
@@ -616,6 +647,8 @@ module.exports = {
   deleteModel,
   listTaskModels,
   updateTaskModel,
+  listTaskPrompts,
+  upsertTaskPrompt,
   listFeedbacks,
   getFeedback,
   // 新增导出

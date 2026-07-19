@@ -519,6 +519,26 @@ function format(tpl, vars) {
   return tpl.replace(/\{(\w+)\}/g, (_, key) => (vars[key] !== undefined ? String(vars[key]) : ''));
 }
 
+/**
+ * 各任务「代码默认业务指令」——供管理端/用户端展示与回退；不含 Schema/输出强制段。
+ * 真正调用时若无 DB 覆盖，仍使用上方完整 FULL Prompt，保证行为不变。
+ */
+const CODE_DEFAULT_INSTRUCTIONS = {
+  resume_generate: `根据结构化用户信息生成完整简历。联合全部字段建立候选人画像，保留明确求职方向，按岗位适度构造低风险内容，不得虚构强事实或新增用户未填写的经历。`,
+  resume_extract: `把输入原文中明确出现的内容忠实映射为简历 JSON。只做信息抽取，禁止润色、补写、推断或岗位优化。`,
+  project_optimize: `重构单条项目经历为高信息密度要点，结合目标岗位与全简历上下文，不得虚构量化成果。`,
+  summary_optimize: `优化个人评价，突出与目标岗位相关的能力画像，保持真实可面试。`,
+  skills_optimize: `整理并优化技能列表，去重、规范名称，按岗位相关度排序。`,
+  internship_optimize: `优化单条实习经历描述，突出参与范围与交付物，不得编造结果。`,
+  work_experience_optimize: `优化单条工作经历描述，强化职责、动作与有依据的价值。`,
+  jd_match: `分析简历与 JD 的匹配度，指出证据匹配项与缺口，输出规定 JSON。`,
+  score: `按通用评分口径为简历打分并给出简短改进建议。`,
+  pdf_optimize: `基于 PDF 提取文本优化完整简历，并给出简短优化说明。`,
+  jd_resume_optimize: `按岗位 JD 优化完整简历，输出 resume 与 optimization_notes。`,
+  pdf_jd_optimize: `结合 PDF 原文与 JD 优化完整简历。`,
+  jd_image_extract: `忠实转录图片中的岗位招聘信息为纯文本，不润色、不补全。`,
+};
+
 module.exports = {
   RESUME_GENERATE_PROMPT,
   LAZY_GENERATE_PROMPT,
@@ -535,5 +555,13 @@ module.exports = {
   JD_RESUME_OPTIMIZE_PROMPT,
   PDF_JD_OPTIMIZE_PROMPT,
   JD_IMAGE_EXTRACT_PROMPT,
+  CODE_DEFAULT_INSTRUCTIONS,
+  composePrompt,
+  COMMON_RESUME_SCHEMA,
+  COMMON_DIRECT_RESUME_OUTPUT,
+  COMMON_WRAPPED_RESUME_OUTPUT,
+  COMMON_INPUT_BOUNDARY,
+  COMMON_SCREENING_QUALITY_GATE,
+  COMMON_FAIR_RECRUITING_RULES,
   format,
 };

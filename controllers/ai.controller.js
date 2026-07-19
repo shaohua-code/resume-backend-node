@@ -25,6 +25,11 @@ function getRequestedModel(req) {
   return (req.body && req.body.model) || req.query.model || '';
 }
 
+/** 透传调用用户，供模型/提示词用户级覆盖解析 */
+function getAiOptions(req, extra = {}) {
+  return { model: getRequestedModel(req), userId: req.user && req.user.id, ...extra };
+}
+
 function setupSSE(res) {
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -92,7 +97,7 @@ async function generate(req, res) {
     await ensureAiQuota(req, taskType);
     const body = req.body || {};
     const isLazy = body.input_mode === 'lazy';
-    const aiOptions = { model, inputMode: isLazy ? 'lazy' : 'form' };
+    const aiOptions = getAiOptions(req, { inputMode: isLazy ? 'lazy' : 'form' });
     const userInput = isLazy ? body : JSON.stringify(body);
     const { data, meta } = await aiService.generateResume(userInput, aiOptions);
     if (!data || Object.keys(data).length === 0) {
@@ -116,7 +121,7 @@ async function generateStream(req, res) {
     await ensureAiQuota(req, taskType);
     const body = req.body || {};
     const isLazy = body.input_mode === 'lazy';
-    const aiOptions = { model, inputMode: isLazy ? 'lazy' : 'form' };
+    const aiOptions = getAiOptions(req, { inputMode: isLazy ? 'lazy' : 'form' });
     const userInput = isLazy ? body : JSON.stringify(body);
     const { data, meta } = await aiService.generateResumeStream(userInput, aiOptions, (chunk) => {
       sendEvent({ chunk });
@@ -152,7 +157,7 @@ async function extractResumeStream(req, res) {
     sendEvent({ status: '正在识别文字中的简历字段...' });
     const { data, meta } = await aiService.extractResumeFromTextStream(
       rawText,
-      { model },
+      getAiOptions(req),
       (chunk) => sendEvent({ chunk }),
     );
     if (!data?.resume || Object.keys(data.resume).length === 0) {
@@ -181,7 +186,7 @@ async function optimize(req, res) {
     if (!project_description) {
       return error(res, 400, 'project_description 不能为空');
     }
-    const { data, meta } = await aiService.optimizeProject(project_description, target_position || '', { model });
+    const { data, meta } = await aiService.optimizeProject(project_description, target_position || '', getAiOptions(req));
     if (!data || Object.keys(data).length === 0) {
       await recordAiCall(req, taskType, model, false, 'AI优化失败，请重试');
       return error(res, 500, 'AI优化失败，请重试');
@@ -213,7 +218,7 @@ async function optimizeByJdStream(req, res) {
     const { data, meta } = await aiService.optimizeResumeByJdStream(
       resume,
       String(jdText).trim(),
-      { model },
+      getAiOptions(req),
       (chunk) => {
         sendEvent({ chunk });
       },
@@ -253,7 +258,7 @@ async function extractJdImage(req, res) {
       const { data, meta } = await aiService.extractJdFromImage(
         req.file.buffer,
         req.file.mimetype,
-        { model },
+        getAiOptions(req),
       );
       if (!data?.jd_text) {
         await recordAiCall(req, taskType, model, false, '未能从图片中提取 JD 内容');
@@ -292,7 +297,7 @@ async function extractJdImageStream(req, res) {
       const { data, meta } = await aiService.extractJdFromImageStream(
         req.file.buffer,
         req.file.mimetype,
-        { model },
+        getAiOptions(req),
         (chunk) => {
           sendEvent({ chunk });
         },
@@ -343,11 +348,11 @@ async function optimizeStream(req, res) {
 
     let serviceResult;
     if (type === 'summary') {
-      serviceResult = await aiService.optimizeSummaryStream(resume, targetPosition, { model }, (chunk) => {
+      serviceResult = await aiService.optimizeSummaryStream(resume, targetPosition, getAiOptions(req), (chunk) => {
         sendEvent({ chunk });
       });
     } else if (type === 'skills') {
-      serviceResult = await aiService.optimizeSkillsStream(resume, targetPosition, { model }, (chunk) => {
+      serviceResult = await aiService.optimizeSkillsStream(resume, targetPosition, getAiOptions(req), (chunk) => {
         sendEvent({ chunk });
       });
     } else if (type === 'project') {
@@ -356,7 +361,7 @@ async function optimizeStream(req, res) {
         sendEvent({ error: '项目不存在' });
         return res.end();
       }
-      serviceResult = await aiService.optimizeProjectStream(project, resume, targetPosition, { model }, (chunk) => {
+      serviceResult = await aiService.optimizeProjectStream(project, resume, targetPosition, getAiOptions(req), (chunk) => {
         sendEvent({ chunk });
       });
     } else if (type === 'internship') {
@@ -365,7 +370,7 @@ async function optimizeStream(req, res) {
         sendEvent({ error: '实习经历不存在' });
         return res.end();
       }
-      serviceResult = await aiService.optimizeInternshipStream(internship, resume, targetPosition, { model }, (chunk) => {
+      serviceResult = await aiService.optimizeInternshipStream(internship, resume, targetPosition, getAiOptions(req), (chunk) => {
         sendEvent({ chunk });
       });
     } else if (type === 'work_experience') {
@@ -375,7 +380,7 @@ async function optimizeStream(req, res) {
         sendEvent({ error: '工作经历不存在' });
         return res.end();
       }
-      serviceResult = await aiService.optimizeWorkExperienceStream(workExp, resume, targetPosition, { model }, (chunk) => {
+      serviceResult = await aiService.optimizeWorkExperienceStream(workExp, resume, targetPosition, getAiOptions(req), (chunk) => {
         sendEvent({ chunk });
       });
     }
@@ -404,7 +409,7 @@ async function matchJd(req, res) {
     await ensureAiQuota(req, taskType);
     const { resume_id, jd_text } = req.body || {};
     const resumeJson = await getResumeJson(req, resume_id);
-    const { data: matchData, meta } = await aiService.matchJd(resumeJson, jd_text || '', { model });
+    const { data: matchData, meta } = await aiService.matchJd(resumeJson, jd_text || '', getAiOptions(req));
     await recordAiCall(req, taskType, model, true, '', meta);
     return success(res, matchData, '匹配分析完成');
   } catch (e) {
@@ -421,7 +426,7 @@ async function score(req, res) {
     await ensureAiQuota(req, taskType);
     const resumeId = req.query.resume_id || req.body?.resume_id;
     const resumeJson = await getResumeJson(req, resumeId);
-    const { data: scoreData, meta } = await aiService.scoreResume(resumeJson, { model });
+    const { data: scoreData, meta } = await aiService.scoreResume(resumeJson, getAiOptions(req));
     await recordAiCall(req, taskType, model, true, '', meta);
     return success(res, scoreData, '评分完成');
   } catch (e) {
@@ -439,7 +444,7 @@ async function scoreStream(req, res) {
     await ensureAiQuota(req, taskType);
     const resumeId = req.query.resume_id || req.body?.resume_id;
     const resumeJson = await getResumeJson(req, resumeId);
-    const { data: scoreData, meta } = await aiService.scoreResumeStream(resumeJson, { model }, (chunk) => {
+    const { data: scoreData, meta } = await aiService.scoreResumeStream(resumeJson, getAiOptions(req), (chunk) => {
       sendEvent({ chunk });
     });
     await recordAiCall(req, taskType, model, true, '', meta);

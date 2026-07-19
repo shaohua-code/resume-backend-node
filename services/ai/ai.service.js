@@ -19,25 +19,20 @@ const {
 } = require('./ai.model');
 const { withDeepseekFallback } = require('./ai.fallback');
 const { hasResumeContent, extractTargetPosition } = require('./resume-content');
-const {
-  RESUME_GENERATE_PROMPT,
-  LAZY_GENERATE_PROMPT,
-  RESUME_EXTRACT_PROMPT,
-  OPTIMIZE_PROJECT_PROMPT,
-  OPTIMIZE_SUMMARY_PROMPT,
-  OPTIMIZE_SKILLS_PROMPT,
-  OPTIMIZE_INTERNSHIP_PROMPT,
-  // 工作经历（正式全职）优化 Prompt
-  OPTIMIZE_WORK_EXPERIENCE_PROMPT,
-  JD_MATCH_PROMPT,
-  SCORE_PROMPT,
-  SCORE_STREAM_PROMPT,
-  PDF_OPTIMIZE_PROMPT,
-  JD_RESUME_OPTIMIZE_PROMPT,
-  PDF_JD_OPTIMIZE_PROMPT,
-  JD_IMAGE_EXTRACT_PROMPT,
-  format,
-} = require('./ai.prompts');
+const { JD_IMAGE_EXTRACT_PROMPT } = require('./ai.prompts');
+const { resolveFormattedPrompt } = require('./ai.promptResolve');
+
+/** 组装任务 Prompt：支持用户/管理员指令覆盖，输出格式始终由代码锁定 */
+async function buildTaskPrompt(taskType, vars, options = {}, promptKey) {
+  return resolveFormattedPrompt(taskType, vars, {
+    userId: options.userId,
+    promptKey,
+  });
+}
+
+function modelCallOptions(task, options = {}) {
+  return { task, model: options.model, userId: options.userId };
+}
 
 // 组装调用元信息，供 recordAiCall 写入审计表
 async function buildMeta(model, usage) {
@@ -106,7 +101,8 @@ async function callDeepseek(prompt, options = {}) {
   return withDeepseekFallback(
     options.task,
     async () => {
-      const runtime = await resolveModelConfig(options.task, options.model);
+      // 传入 userId 以应用用户级任务模型覆盖（开关关闭时自动忽略）
+      const runtime = await resolveModelConfig(options.task, options.model, options.userId);
       return callChatCompletion(prompt, runtime);
     },
     () => callChatCompletion(prompt, resolveDeepseekFallbackConfig(options.task)),
@@ -187,7 +183,7 @@ async function callDeepseekStream(prompt, options = {}, onChunk) {
   return withDeepseekFallback(
     options.task,
     async () => {
-      const runtime = await resolveModelConfig(options.task, options.model);
+      const runtime = await resolveModelConfig(options.task, options.model, options.userId);
       return callChatCompletionStream(prompt, runtime, handlePrimaryChunk);
     },
     () => callChatCompletionStream(
@@ -210,7 +206,7 @@ async function callDeepseekStream(prompt, options = {}, onChunk) {
  * @param {string} mimeType 如 image/jpeg
  */
 async function callDeepseekVision(imageBuffer, mimeType, textPrompt, options = {}) {
-  const runtime = await resolveModelConfig(options.task, options.model);
+  const runtime = await resolveModelConfig(options.task, options.model, options.userId);
   assertRuntimeConfig(runtime);
   const model = runtime.modelKey;
   const base64 = imageBuffer.toString('base64');
@@ -444,21 +440,21 @@ function buildResumeContext(resume) {
 
 // ========== Prompt 组装 ==========
 
-function resolveGeneratePrompt(bodyOrString, options = {}) {
+async function resolveGeneratePrompt(bodyOrString, options = {}) {
   const isLazy = options.inputMode === 'lazy';
   if (isLazy) {
     const body = typeof bodyOrString === 'object' ? bodyOrString : {};
     const rawText = body.raw_text || (typeof bodyOrString === 'string' ? bodyOrString : '');
     const targetPosition = body.target_position || '';
-    return format(LAZY_GENERATE_PROMPT, {
+    return buildTaskPrompt(AI_TASK.RESUME_GENERATE, {
       user_input: rawText,
       target_position: targetPosition || '未指定',
-    });
+    }, options, 'lazy_generate');
   }
   const userInput = typeof bodyOrString === 'string'
     ? bodyOrString
     : JSON.stringify(bodyOrString);
-  return format(RESUME_GENERATE_PROMPT, { user_input: userInput });
+  return buildTaskPrompt(AI_TASK.RESUME_GENERATE, { user_input: userInput }, options);
 }
 
 // ========== 对外服务方法 ==========
@@ -467,8 +463,8 @@ function resolveGeneratePrompt(bodyOrString, options = {}) {
  * AI 生成简历（非流式）
  */
 async function generateResume(userInput, options = {}) {
-  const prompt = resolveGeneratePrompt(userInput, options);
-  const { content, usage, model, cost } = await callDeepseek(prompt, { task: AI_TASK.RESUME_GENERATE, model: options.model });
+  const prompt = await resolveGeneratePrompt(userInput, options);
+  const { content, usage, model, cost } = await callDeepseek(prompt, modelCallOptions(AI_TASK.RESUME_GENERATE, options));
   return { data: extractJson(content), meta: { model, usage, cost } };
 }
 
@@ -476,10 +472,10 @@ async function generateResume(userInput, options = {}) {
  * 流式 AI 生成简历
  */
 async function generateResumeStream(userInput, options = {}, onChunk) {
-  const prompt = resolveGeneratePrompt(userInput, options);
+  const prompt = await resolveGeneratePrompt(userInput, options);
   const { content, usage, model, cost } = await callDeepseekStream(
     prompt,
-    { task: AI_TASK.RESUME_GENERATE, model: options.model },
+    modelCallOptions(AI_TASK.RESUME_GENERATE, options),
     onChunk,
   );
   return { data: extractJson(content), meta: { model, usage, cost } };
@@ -500,12 +496,12 @@ async function extractResumeFromTextStream(resumeText, options = {}, onChunk) {
     throw err;
   }
 
-  const prompt = format(RESUME_EXTRACT_PROMPT, {
+  const prompt = await buildTaskPrompt(AI_TASK.RESUME_EXTRACT, {
     resume_source: sourceText,
-  });
+  }, options);
   const { content, usage, model, cost } = await callDeepseekStream(
     prompt,
-    { task: AI_TASK.RESUME_EXTRACT, model: options.model },
+    modelCallOptions(AI_TASK.RESUME_EXTRACT, options),
     onChunk,
   );
   // 区分解析失败与合法空结果，避免 JSON 瑕疵被误报成“无简历信息”。
@@ -531,13 +527,13 @@ async function extractResumeFromTextStream(resumeText, options = {}, onChunk) {
  * AI 优化项目经历描述（非流式）
  */
 async function optimizeProject(projectDescription, targetPosition = '', options = {}) {
-  const prompt = format(OPTIMIZE_PROJECT_PROMPT, {
+  const prompt = await buildTaskPrompt(AI_TASK.PROJECT_OPTIMIZE, {
     project_description: projectDescription,
     project_record: JSON.stringify({ description: projectDescription || '' }),
     target_position: targetPosition || '通用职业方向',
     resume_context: '',
-  });
-  const { content, usage, model, cost } = await callDeepseek(prompt, { task: AI_TASK.PROJECT_OPTIMIZE, model: options.model });
+  }, options);
+  const { content, usage, model, cost } = await callDeepseek(prompt, modelCallOptions(AI_TASK.PROJECT_OPTIMIZE, options));
   return { data: extractJson(content), meta: { model, usage, cost } };
 }
 
@@ -545,15 +541,15 @@ async function optimizeProject(projectDescription, targetPosition = '', options 
  * 流式优化项目经历描述
  */
 async function optimizeProjectStream(project, resume, targetPosition = '', options = {}, onChunk) {
-  const prompt = format(OPTIMIZE_PROJECT_PROMPT, {
+  const prompt = await buildTaskPrompt(AI_TASK.PROJECT_OPTIMIZE, {
     project_description: project.description || '',
     project_record: JSON.stringify(project || {}),
     target_position: targetPosition || '通用职业方向',
     resume_context: buildResumeContext(resume),
-  });
+  }, options);
   const { content, usage, model, cost } = await callDeepseekStream(
     prompt,
-    { task: AI_TASK.PROJECT_OPTIMIZE, model: options.model },
+    modelCallOptions(AI_TASK.PROJECT_OPTIMIZE, options),
     onChunk,
   );
   return { data: extractJson(content), meta: { model, usage, cost } };
@@ -563,13 +559,13 @@ async function optimizeProjectStream(project, resume, targetPosition = '', optio
  * 流式优化个人评价
  */
 async function optimizeSummaryStream(resume, targetPosition = '', options = {}, onChunk) {
-  const prompt = format(OPTIMIZE_SUMMARY_PROMPT, {
+  const prompt = await buildTaskPrompt(AI_TASK.SUMMARY_OPTIMIZE, {
     target_position: targetPosition || '通用职业方向',
     resume_context: buildResumeContext(resume),
-  });
+  }, options);
   const { content, usage, model, cost } = await callDeepseekStream(
     prompt,
-    { task: AI_TASK.SUMMARY_OPTIMIZE, model: options.model },
+    modelCallOptions(AI_TASK.SUMMARY_OPTIMIZE, options),
     onChunk,
   );
   return { data: extractJson(content), meta: { model, usage, cost } };
@@ -579,14 +575,14 @@ async function optimizeSummaryStream(resume, targetPosition = '', options = {}, 
  * 流式优化技能特长
  */
 async function optimizeSkillsStream(resume, targetPosition = '', options = {}, onChunk) {
-  const prompt = format(OPTIMIZE_SKILLS_PROMPT, {
+  const prompt = await buildTaskPrompt(AI_TASK.SKILLS_OPTIMIZE, {
     target_position: targetPosition || '通用职业方向',
     skills: Array.isArray(resume.skills) ? resume.skills.join('、') : '',
     resume_context: buildResumeContext(resume),
-  });
+  }, options);
   const { content, usage, model, cost } = await callDeepseekStream(
     prompt,
-    { task: AI_TASK.SKILLS_OPTIMIZE, model: options.model },
+    modelCallOptions(AI_TASK.SKILLS_OPTIMIZE, options),
     onChunk,
   );
   return { data: extractJson(content), meta: { model, usage, cost } };
@@ -596,15 +592,15 @@ async function optimizeSkillsStream(resume, targetPosition = '', options = {}, o
  * 流式优化实习经历描述
  */
 async function optimizeInternshipStream(internship, resume, targetPosition = '', options = {}, onChunk) {
-  const prompt = format(OPTIMIZE_INTERNSHIP_PROMPT, {
+  const prompt = await buildTaskPrompt(AI_TASK.INTERNSHIP_OPTIMIZE, {
     internship_description: internship.description || '',
     internship_record: JSON.stringify(internship || {}),
     target_position: targetPosition || '通用职业方向',
     resume_context: buildResumeContext(resume),
-  });
+  }, options);
   const { content, usage, model, cost } = await callDeepseekStream(
     prompt,
-    { task: AI_TASK.INTERNSHIP_OPTIMIZE, model: options.model },
+    modelCallOptions(AI_TASK.INTERNSHIP_OPTIMIZE, options),
     onChunk,
   );
   return { data: extractJson(content), meta: { model, usage, cost } };
@@ -621,15 +617,15 @@ async function optimizeInternshipStream(internship, resume, targetPosition = '',
  */
 async function optimizeWorkExperienceStream(workExp, resume, targetPosition = '', options = {}, onChunk) {
   // 使用工作经历专用 Prompt（区别于实习，强调职业深度和业务价值）
-  const prompt = format(OPTIMIZE_WORK_EXPERIENCE_PROMPT, {
+  const prompt = await buildTaskPrompt(AI_TASK.WORK_EXPERIENCE_OPTIMIZE, {
     work_experience_description: workExp.description || '',
     work_experience_record: JSON.stringify(workExp || {}),
     target_position: targetPosition || '通用职业方向',
     resume_context: buildResumeContext(resume),
-  });
+  }, options);
   const { content, usage, model, cost } = await callDeepseekStream(
     prompt,
-    { task: AI_TASK.WORK_EXPERIENCE_OPTIMIZE, model: options.model },
+    modelCallOptions(AI_TASK.WORK_EXPERIENCE_OPTIMIZE, options),
     onChunk,
   );
   return { data: extractJson(content), meta: { model, usage, cost } };
@@ -639,8 +635,8 @@ async function optimizeWorkExperienceStream(workExp, resume, targetPosition = ''
  * JD 岗位匹配分析
  */
 async function matchJd(resumeContent, jdText, options = {}) {
-  const prompt = format(JD_MATCH_PROMPT, { resume_content: resumeContent, jd_text: jdText });
-  const { content, usage, model, cost } = await callDeepseek(prompt, { task: AI_TASK.JD_MATCH, model: options.model });
+  const prompt = await buildTaskPrompt(AI_TASK.JD_MATCH, { resume_content: resumeContent, jd_text: jdText }, options);
+  const { content, usage, model, cost } = await callDeepseek(prompt, modelCallOptions(AI_TASK.JD_MATCH, options));
   const parsed = extractJson(content);
   return {
     data: {
@@ -657,8 +653,8 @@ async function matchJd(resumeContent, jdText, options = {}) {
  * AI 简历评分
  */
 async function scoreResume(resumeContent, options = {}) {
-  const prompt = format(SCORE_PROMPT, { resume_content: resumeContent });
-  const { content, usage, model, cost } = await callDeepseek(prompt, { task: AI_TASK.SCORE, model: options.model });
+  const prompt = await buildTaskPrompt(AI_TASK.SCORE, { resume_content: resumeContent }, options);
+  const { content, usage, model, cost } = await callDeepseek(prompt, modelCallOptions(AI_TASK.SCORE, options));
   const parsed = extractJson(content);
   return {
     data: {
@@ -679,7 +675,7 @@ async function scoreResume(resumeContent, options = {}) {
  * @param {string} mimeType 如 image/jpeg
  */
 async function callDeepseekVisionStream(imageBuffer, mimeType, textPrompt, options = {}, onChunk) {
-  const runtime = await resolveModelConfig(options.task, options.model);
+  const runtime = await resolveModelConfig(options.task, options.model, options.userId);
   assertRuntimeConfig(runtime);
   const model = runtime.modelKey;
   const base64 = imageBuffer.toString('base64');
@@ -796,10 +792,10 @@ function createScoreVisibleChunkHandler(onChunk) {
 }
 
 async function scoreResumeStream(resumeContent, options = {}, onChunk) {
-  const prompt = format(SCORE_STREAM_PROMPT, { resume_content: resumeContent });
+  const prompt = await buildTaskPrompt(AI_TASK.SCORE, { resume_content: resumeContent }, options, 'score_stream');
   const { content, usage, model, cost } = await callDeepseekStream(
     prompt,
-    { task: AI_TASK.SCORE, model: options.model },
+    modelCallOptions(AI_TASK.SCORE, options),
     createScoreVisibleChunkHandler(onChunk),
   );
   return { data: parseScorePayload(content), meta: { model, usage, cost } };
@@ -809,11 +805,11 @@ async function scoreResumeStream(resumeContent, options = {}, onChunk) {
  * 基于 PDF 文本整体优化简历（非流式）
  */
 async function optimizeFromPdfText(pdfText, targetPosition = '', options = {}) {
-  const prompt = format(PDF_OPTIMIZE_PROMPT, {
+  const prompt = await buildTaskPrompt(AI_TASK.PDF_OPTIMIZE, {
     pdf_text: pdfText,
     target_position: targetPosition || '通用职业方向',
-  });
-  const { content, usage, model, cost } = await callDeepseek(prompt, { task: AI_TASK.PDF_OPTIMIZE, model: options.model });
+  }, options);
+  const { content, usage, model, cost } = await callDeepseek(prompt, modelCallOptions(AI_TASK.PDF_OPTIMIZE, options));
   const parsed = extractJson(content);
   if (!parsed || Object.keys(parsed).length === 0) {
     return { data: { resume: {}, optimization_notes: [] }, meta: { model, usage, cost } };
@@ -832,11 +828,13 @@ async function optimizeFromPdfText(pdfText, targetPosition = '', options = {}) {
  * 从 JD 图片中提取岗位描述文本（OCR/视觉模型）
  */
 async function extractJdFromImage(imageBuffer, mimeType = 'image/jpeg', options = {}) {
+  // 视觉 OCR：指令可被覆盖，默认仍用代码完整 Prompt
+  const textPrompt = await buildTaskPrompt(AI_TASK.JD_IMAGE_EXTRACT, {}, options);
   const { content, usage, model, cost } = await callDeepseekVision(
     imageBuffer,
     mimeType,
-    JD_IMAGE_EXTRACT_PROMPT,
-    { task: AI_TASK.JD_IMAGE_EXTRACT, model: options.model },
+    textPrompt || JD_IMAGE_EXTRACT_PROMPT,
+    modelCallOptions(AI_TASK.JD_IMAGE_EXTRACT, options),
   );
   const jdText = String(content || '').trim();
   return {
@@ -849,11 +847,12 @@ async function extractJdFromImage(imageBuffer, mimeType = 'image/jpeg', options 
  * 从 JD 图片中流式提取岗位描述文本（OCR/视觉模型）
  */
 async function extractJdFromImageStream(imageBuffer, mimeType = 'image/jpeg', options = {}, onChunk) {
+  const textPrompt = await buildTaskPrompt(AI_TASK.JD_IMAGE_EXTRACT, {}, options);
   const { content, usage, model, cost } = await callDeepseekVisionStream(
     imageBuffer,
     mimeType,
-    JD_IMAGE_EXTRACT_PROMPT,
-    { task: AI_TASK.JD_IMAGE_EXTRACT, model: options.model },
+    textPrompt || JD_IMAGE_EXTRACT_PROMPT,
+    modelCallOptions(AI_TASK.JD_IMAGE_EXTRACT, options),
     onChunk,
   );
   const jdText = String(content || '').trim();
@@ -867,13 +866,13 @@ async function extractJdFromImageStream(imageBuffer, mimeType = 'image/jpeg', op
  * 流式 PDF 简历优化
  */
 async function optimizeFromPdfTextStream(pdfText, targetPosition = '', options = {}, onChunk) {
-  const prompt = format(PDF_OPTIMIZE_PROMPT, {
+  const prompt = await buildTaskPrompt(AI_TASK.PDF_OPTIMIZE, {
     pdf_text: pdfText,
     target_position: targetPosition || '通用职业方向',
-  });
+  }, options);
   const { content, usage, model, cost } = await callDeepseekStream(
     prompt,
-    { task: AI_TASK.PDF_OPTIMIZE, model: options.model },
+    modelCallOptions(AI_TASK.PDF_OPTIMIZE, options),
     onChunk,
   );
   const parsed = extractJson(content);
@@ -894,13 +893,13 @@ async function optimizeFromPdfTextStream(pdfText, targetPosition = '', options =
  * 基于 PDF 原文 + 岗位 JD 流式优化简历（Upload 模式）
  */
 async function optimizePdfByJdStream(pdfText, jdText = '', options = {}, onChunk) {
-  const prompt = format(PDF_JD_OPTIMIZE_PROMPT, {
+  const prompt = await buildTaskPrompt(AI_TASK.PDF_JD_OPTIMIZE, {
     pdf_text: pdfText || '',
     jd_text: jdText || '',
-  });
+  }, options);
   const { content, usage, model, cost } = await callDeepseekStream(
     prompt,
-    { task: AI_TASK.PDF_JD_OPTIMIZE, model: options.model },
+    modelCallOptions(AI_TASK.PDF_JD_OPTIMIZE, options),
     onChunk,
   );
   const parsed = extractJson(content);
@@ -925,13 +924,13 @@ async function optimizePdfByJdStream(pdfText, jdText = '', options = {}, onChunk
  */
 async function optimizeResumeByJdStream(resumeJson, jdText = '', options = {}, onChunk) {
   const resumeStr = typeof resumeJson === 'string' ? resumeJson : JSON.stringify(resumeJson || {});
-  const prompt = format(JD_RESUME_OPTIMIZE_PROMPT, {
+  const prompt = await buildTaskPrompt(AI_TASK.JD_RESUME_OPTIMIZE, {
     jd_text: jdText || '',
     resume_json: resumeStr,
-  });
+  }, options);
   const { content, usage, model, cost } = await callDeepseekStream(
     prompt,
-    { task: AI_TASK.JD_RESUME_OPTIMIZE, model: options.model },
+    modelCallOptions(AI_TASK.JD_RESUME_OPTIMIZE, options),
     onChunk,
   );
   const parsed = extractJson(content);

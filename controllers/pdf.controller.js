@@ -14,6 +14,10 @@ function getRequestedModel(req) {
   return (req.body && req.body.model) || req.query.model || '';
 }
 
+function getAiOptions(req) {
+  return { model: getRequestedModel(req), userId: req.user && req.user.id };
+}
+
 function setupSSE(res) {
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -22,18 +26,18 @@ function setupSSE(res) {
   return (payload) => res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
-async function parseAndOptimize(filePath, targetPosition, model, onChunk = null) {
+async function parseAndOptimize(filePath, targetPosition, aiOptions, onChunk = null) {
   const pdfText = await pdfService.parsePdfFile(filePath);
   if (onChunk) {
-    return aiService.optimizeFromPdfTextStream(pdfText, targetPosition, { model }, onChunk);
+    return aiService.optimizeFromPdfTextStream(pdfText, targetPosition, aiOptions, onChunk);
   }
-  return aiService.optimizeFromPdfText(pdfText, targetPosition, { model });
+  return aiService.optimizeFromPdfText(pdfText, targetPosition, aiOptions);
 }
 
 /** PDF 原文 + JD 联合流式优化 */
-async function parseAndOptimizeByJd(filePath, jdText, model, onChunk) {
+async function parseAndOptimizeByJd(filePath, jdText, aiOptions, onChunk) {
   const pdfText = await pdfService.parsePdfFile(filePath);
-  return aiService.optimizePdfByJdStream(pdfText, jdText, { model }, onChunk);
+  return aiService.optimizePdfByJdStream(pdfText, jdText, aiOptions, onChunk);
 }
 
 async function uploadOptimize(req, res) {
@@ -50,7 +54,7 @@ async function uploadOptimize(req, res) {
     const targetPosition = req.body?.target_position || '';
     try {
       await ensureAiQuota(req, taskType);
-      const { data, meta } = await parseAndOptimize(filePath, targetPosition, model);
+      const { data, meta } = await parseAndOptimize(filePath, targetPosition, getAiOptions(req));
       if (!data || !data.resume || Object.keys(data.resume).length === 0) {
         await recordAiCall(req, taskType, model, false, 'AI优化失败，请重试');
         return error(res, 500, 'AI优化失败，请重试');
@@ -91,7 +95,7 @@ async function uploadOptimizeStream(req, res) {
       await ensureAiQuota(req, taskType);
       const pdfText = await pdfService.parsePdfFile(filePath);
       sendEvent({ status: 'PDF 解析完成，AI 正在优化...' });
-      const { data, meta } = await aiService.optimizeFromPdfTextStream(pdfText, targetPosition, { model }, (chunk) => {
+      const { data, meta } = await aiService.optimizeFromPdfTextStream(pdfText, targetPosition, getAiOptions(req), (chunk) => {
         sendEvent({ chunk });
       });
       if (!data || !data.resume || Object.keys(data.resume).length === 0) {
@@ -152,7 +156,7 @@ async function uploadRecognizeStream(req, res) {
       sendEvent({ status: 'PDF 解析完成，正在识别简历字段...' });
       const { data, meta } = await aiService.extractResumeFromTextStream(
         pdfText,
-        { model },
+        getAiOptions(req),
         (chunk) => sendEvent({ chunk }),
       );
       if (!data?.resume || Object.keys(data.resume).length === 0) {
@@ -197,7 +201,7 @@ async function existingRecognizeStream(req, res) {
     sendEvent({ status: 'PDF 解析完成，正在识别简历字段...' });
     const { data, meta } = await aiService.extractResumeFromTextStream(
       pdfText,
-      { model },
+      getAiOptions(req),
       (chunk) => sendEvent({ chunk }),
     );
     if (!data?.resume || Object.keys(data.resume).length === 0) {
@@ -242,7 +246,7 @@ async function uploadOptimizeByJdStream(req, res) {
     try {
       await ensureAiQuota(req, taskType);
       sendEvent({ status: 'PDF 解析完成，AI 正在根据岗位 岗位优化...' });
-      const { data, meta } = await parseAndOptimizeByJd(filePath, jdText, model, (chunk) => {
+      const { data, meta } = await parseAndOptimizeByJd(filePath, jdText, getAiOptions(req), (chunk) => {
         sendEvent({ chunk });
       });
       if (!data || !data.resume || Object.keys(data.resume).length === 0) {
@@ -288,7 +292,7 @@ async function existingOptimize(req, res) {
   const targetPosition = req.body?.target_position || '';
   try {
     await ensureAiQuota(req, taskType);
-    const { data, meta } = await parseAndOptimize(filePath, targetPosition, model);
+    const { data, meta } = await parseAndOptimize(filePath, targetPosition, getAiOptions(req));
     if (!data || !data.resume || Object.keys(data.resume).length === 0) {
       await recordAiCall(req, taskType, model, false, 'AI优化失败，请重试');
       return error(res, 500, 'AI优化失败，请重试');
@@ -325,7 +329,7 @@ async function existingOptimizeStream(req, res) {
     await ensureAiQuota(req, taskType);
     const pdfText = await pdfService.parsePdfFile(filePath);
     sendEvent({ status: '读取已上传简历，AI 正在优化...' });
-    const { data, meta } = await aiService.optimizeFromPdfTextStream(pdfText, targetPosition, { model }, (chunk) => {
+    const { data, meta } = await aiService.optimizeFromPdfTextStream(pdfText, targetPosition, getAiOptions(req), (chunk) => {
       sendEvent({ chunk });
     });
     if (!data || !data.resume || Object.keys(data.resume).length === 0) {
@@ -379,7 +383,7 @@ async function existingOptimizeByJdStream(req, res) {
   try {
     await ensureAiQuota(req, taskType);
     sendEvent({ status: '读取已上传简历，AI 正在根据岗位 岗位优化...' });
-    const { data, meta } = await parseAndOptimizeByJd(filePath, jdText, model, (chunk) => {
+    const { data, meta } = await parseAndOptimizeByJd(filePath, jdText, getAiOptions(req), (chunk) => {
       sendEvent({ chunk });
     });
     if (!data || !data.resume || Object.keys(data.resume).length === 0) {
@@ -419,6 +423,21 @@ async function uploadedFileMeta(req, res) {
   return success(res, meta);
 }
 
+/**
+ * 流式返回当前用户私有 PDF，供前端 iframe 预览；不暴露公开 URL。
+ */
+async function uploadedFileContent(req, res) {
+  const fs = require('fs');
+  const filePath = pdfService.getUserPdfPath(req.user.id);
+  if (!fs.existsSync(filePath)) {
+    return error(res, 404, '尚未上传 PDF');
+  }
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'inline; filename="resume.pdf"');
+  res.setHeader('Cache-Control', 'private, no-store');
+  return fs.createReadStream(filePath).pipe(res);
+}
+
 async function deleteUploadedFile(req, res) {
   pdfService.deleteUserPdf(req.user.id);
   return success(res, {}, '已删除上传的简历');
@@ -434,5 +453,6 @@ module.exports = {
   existingOptimizeStream,
   existingOptimizeByJdStream,
   uploadedFileMeta,
+  uploadedFileContent,
   deleteUploadedFile,
 };

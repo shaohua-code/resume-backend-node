@@ -246,13 +246,23 @@ CREATE TABLE IF NOT EXISTS public.system_config (
 );
 
 CREATE TABLE IF NOT EXISTS public.announcement (
-  id          BIGSERIAL PRIMARY KEY,
-  title       TEXT NOT NULL,
-  content     TEXT NOT NULL DEFAULT '',
-  enabled     BOOLEAN DEFAULT true,
-  create_time TIMESTAMPTZ DEFAULT now(),
-  update_time TIMESTAMPTZ DEFAULT now()
+  id            BIGSERIAL PRIMARY KEY,
+  title         TEXT NOT NULL,
+  content       TEXT NOT NULL DEFAULT '',
+  -- Markdown 正文；前端用 markdown-it（禁 HTML）渲染
+  version_label TEXT DEFAULT '',
+  -- 生效时间窗：空表示不限制该边界；仅在窗内且 enabled 时对登录用户弹窗
+  start_at      TIMESTAMPTZ,
+  end_at        TIMESTAMPTZ,
+  enabled       BOOLEAN DEFAULT true,
+  create_time   TIMESTAMPTZ DEFAULT now(),
+  update_time   TIMESTAMPTZ DEFAULT now()
 );
+
+-- 已有库幂等补列（不另建迁移文件）
+ALTER TABLE public.announcement ADD COLUMN IF NOT EXISTS version_label TEXT DEFAULT '';
+ALTER TABLE public.announcement ADD COLUMN IF NOT EXISTS start_at TIMESTAMPTZ;
+ALTER TABLE public.announcement ADD COLUMN IF NOT EXISTS end_at TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS public.admin_action_log (
   id            BIGSERIAL PRIMARY KEY,
@@ -405,8 +415,43 @@ VALUES
   ('register_gift_amount', '{"amount": 10}'::jsonb, '随机账号首次验证邮箱赠送额度上限（元）'),
   ('super_admin_total_quota', '{"amount": 1000000}'::jsonb, '超级管理员初始总额度池（元）'),
   ('recharge_email_admin_notify', '{"subject":"【AI简历】用户提交了充值凭证","html":"","text":""}'::jsonb, '用户提交充值凭证后通知管理员的邮件模板'),
-  ('recharge_email_user_confirm', '{"subject":"【AI简历】充值已到账","html":"","text":""}'::jsonb, '管理员确认充值后通知用户的邮件模板')
+  ('recharge_email_user_confirm', '{"subject":"【AI简历】充值已到账","html":"","text":""}'::jsonb, '管理员确认充值后通知用户的邮件模板'),
+  -- 超级管理员开启后，普通用户才可在 /user 按任务选择模型 / 编辑提示词指令段
+  ('user_ai_model_customization', '{"enabled": false}'::jsonb, '是否允许用户自定义各 AI 任务模型（仅选择，不配置密钥）'),
+  ('user_ai_prompt_customization', '{"enabled": false}'::jsonb, '是否允许用户自定义各 AI 任务业务提示词（不含输出格式）')
 ON CONFLICT (config_key) DO NOTHING;
+
+-- ========== 用户级 AI 任务模型覆盖（隔离；无覆盖则用全局 ai_task_model） ==========
+CREATE TABLE IF NOT EXISTS public.user_ai_task_model (
+  id          BIGSERIAL PRIMARY KEY,
+  user_id     UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  task_type   TEXT NOT NULL,
+  model_id    BIGINT NOT NULL REFERENCES public.ai_model(id) ON DELETE RESTRICT,
+  create_time TIMESTAMPTZ DEFAULT now(),
+  update_time TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (user_id, task_type)
+);
+CREATE INDEX IF NOT EXISTS idx_user_ai_task_model_user ON public.user_ai_task_model(user_id);
+
+-- ========== 管理员默认 / 用户覆盖：仅业务指令段（输出 Schema 永不入库） ==========
+CREATE TABLE IF NOT EXISTS public.ai_task_prompt (
+  id          BIGSERIAL PRIMARY KEY,
+  task_type   TEXT UNIQUE NOT NULL,
+  instruction TEXT NOT NULL DEFAULT '',
+  create_time TIMESTAMPTZ DEFAULT now(),
+  update_time TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.user_ai_task_prompt (
+  id          BIGSERIAL PRIMARY KEY,
+  user_id     UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  task_type   TEXT NOT NULL,
+  instruction TEXT NOT NULL DEFAULT '',
+  create_time TIMESTAMPTZ DEFAULT now(),
+  update_time TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (user_id, task_type)
+);
+CREATE INDEX IF NOT EXISTS idx_user_ai_task_prompt_user ON public.user_ai_task_prompt(user_id);
 
 INSERT INTO public.ai_model (
   name, model_key, task_type, provider, model_type, api_key_env,

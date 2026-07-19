@@ -62,6 +62,9 @@ router.patch('/models/:id', requirePermission(PERMISSIONS.ADMIN_AI_MODEL), admin
 router.delete('/models/:id', requirePermission(PERMISSIONS.ADMIN_AI_MODEL), adminController.deleteModel)
 router.get('/task-models', requirePermission(PERMISSIONS.ADMIN_AI_MODEL), adminController.listTaskModels)
 router.put('/task-models/:taskType', requirePermission(PERMISSIONS.ADMIN_AI_MODEL), adminController.updateTaskModel)
+// 全局默认业务提示词（不含输出 Schema，Schema 仅代码锁定）
+router.get('/task-prompts', requirePermission(PERMISSIONS.ADMIN_AI_MODEL), adminController.listTaskPrompts)
+router.put('/task-prompts/:taskType', requirePermission(PERMISSIONS.ADMIN_AI_MODEL), adminController.upsertTaskPrompt)
 
 // 通用 CRUD：公告
 const crudConfigs = [
