@@ -557,14 +557,103 @@ function pickProjectList(source = {}) {
   return [];
 }
 
-function normalizeInternship(internship) {
+/** 从多种字段名取出公司名称（兼容模型别名与中文键） */
+function pickCompanyName(item = {}) {
+  const value = item.company
+    || item.company_name
+    || item.companyName
+    || item.employer
+    || item.organization
+    || item.org
+    || item.unit
+    || item.firm
+    || item['公司']
+    || item['公司名称']
+    || item['单位']
+    || item['工作单位']
+    || item['就职单位']
+    || item['实习单位']
+    || item['企业']
+    || '';
+  return String(value || '').trim();
+}
+
+/** 从多种字段名取出职位 */
+function pickPositionName(item = {}) {
+  const value = item.position
+    || item.job_title
+    || item.jobTitle
+    || item.title
+    || item.role
+    || item['职位']
+    || item['岗位']
+    || item['职务']
+    || item['实习岗位']
+    || '';
+  return String(value || '').trim();
+}
+
+function normalizeInternship(internship = {}) {
   return {
-    company: internship.company || '',
-    position: internship.position || '',
-    description: internship.description || '',
-    start_date: internship.start_date || '',
-    end_date: internship.end_date || '',
+    company: pickCompanyName(internship),
+    position: pickPositionName(internship),
+    description: internship.description || internship.content || internship.desc || internship['描述'] || internship['工作内容'] || '',
+    start_date: internship.start_date || internship.startDate || internship['开始时间'] || '',
+    end_date: internship.end_date || internship.endDate || internship['结束时间'] || '',
   };
+}
+
+function normalizeWorkExperience(work = {}) {
+  return {
+    company: pickCompanyName(work),
+    position: pickPositionName(work),
+    department: work.department || work.dept || work['部门'] || '',
+    description: work.description || work.content || work.desc || work['描述'] || work['工作内容'] || '',
+    start_date: work.start_date || work.startDate || work['开始时间'] || '',
+    end_date: work.end_date || work.endDate || work['结束时间'] || '',
+  };
+}
+
+/** 从多种字段名取出实习数组 */
+function pickInternshipList(source = {}) {
+  const candidates = [
+    source.internships,
+    source.internship_experiences,
+    source.internshipExperiences,
+    source.internship_list,
+    source.internshipList,
+    source['实习经历'],
+    source['实习经验'],
+  ];
+  for (const list of candidates) {
+    if (Array.isArray(list) && list.length) return list;
+  }
+  if (typeof source.internships === 'string' && source.internships.trim()) {
+    return [{ description: source.internships.trim() }];
+  }
+  return [];
+}
+
+/** 从多种字段名取出正式工作数组 */
+function pickWorkExperienceList(source = {}) {
+  const candidates = [
+    source.work_experiences,
+    source.workExperiences,
+    source.work_experience,
+    source.workExperience,
+    source.jobs,
+    source.employments,
+    source['工作经历'],
+    source['工作经验'],
+    source['任职经历'],
+  ];
+  for (const list of candidates) {
+    if (Array.isArray(list) && list.length) return list;
+  }
+  if (typeof source.work_experiences === 'string' && source.work_experiences.trim()) {
+    return [{ description: source.work_experiences.trim() }];
+  }
+  return [];
 }
 
 function normalizePdfResume(data, options = {}) {
@@ -600,18 +689,13 @@ function normalizePdfResume(data, options = {}) {
     projects: pickProjectList(source)
       .map(normalizeProject)
       .filter((item) => item.name || item.role || item.description || item.tech_stack || item.start_date || item.end_date),
-    internships: Array.isArray(source.internships) ? source.internships.map(normalizeInternship) : [],
+    internships: pickInternshipList(source)
+      .map(normalizeInternship)
+      .filter((item) => item.company || item.position || item.description || item.start_date || item.end_date),
     // 工作经历（正式全职工作，区别于实习）
-    work_experiences: Array.isArray(source.work_experiences)
-      ? source.work_experiences.map((w) => ({
-          company: w.company || '',
-          position: w.position || '',
-          department: w.department || '',
-          description: w.description || '',
-          start_date: w.start_date || '',
-          end_date: w.end_date || '',
-        }))
-      : [],
+    work_experiences: pickWorkExperienceList(source)
+      .map(normalizeWorkExperience)
+      .filter((item) => item.company || item.position || item.department || item.description || item.start_date || item.end_date),
     awards: normalizeStringList(source.awards),
     certificates: normalizeStringList(source.certificates),
   };

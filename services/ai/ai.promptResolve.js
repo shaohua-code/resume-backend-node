@@ -70,7 +70,9 @@ const LOCKED_TAILS = {
     COMMON_DIRECT_RESUME_OUTPUT,
   ),
   [AI_TASK.RESUME_EXTRACT]: composePrompt(
-    `## 输出JSON结构\n根对象字段与标准简历 Schema 一致；缺失字符串填""，缺失数组填[]；不得输出 null 或额外字段。`,
+    `## 输出JSON结构
+根对象字段与标准简历 Schema 一致；internships/work_experiences 每项必须使用英文字段 company、position（及工作的 department），禁止中文键名；缺失字符串填""，缺失数组填[]；不得输出 null 或额外字段。
+公司名若在原文出现（含经历首行「公司 | 职位 | 时间」），必须写入对应记录的 company。`,
     `## 输入数据\n<resume_source>\n{resume_source}\n</resume_source>`,
     COMMON_DIRECT_RESUME_OUTPUT,
   ),
