@@ -459,6 +459,108 @@ CREATE TABLE IF NOT EXISTS public.user_ai_task_prompt (
 );
 CREATE INDEX IF NOT EXISTS idx_user_ai_task_prompt_user ON public.user_ai_task_prompt(user_id);
 
+-- 管理员默认业务提示词（与 services/ai/ai.prompts.js CODE_DEFAULT_INSTRUCTIONS 对齐；可重复执行）
+-- 完整独立脚本见 database/seed_ai_task_prompt.sql
+INSERT INTO public.ai_task_prompt (task_type, instruction, create_time, update_time)
+VALUES
+  (
+    'resume_generate',
+    $prompt$根据用户填写信息生成完整、可投递的简历。
+1. 有较完整经历时：保留真实姓名、联系方式、公司、学校等事实，逐项优化评价、技能与各段经历，确保相对原文有实质提升。
+2. 仅有姓名+意向岗位等极少信息时：围绕岗位生成示意性个人评价、技能、公司经历与项目，并提示「由于提供信息过少，已基于意向岗位生成若干示意性基本信息，请按真实经历修改后再投递」。
+3. 禁止输出几乎空白或与输入几乎无差异的结果。$prompt$,
+    now(), now()
+  ),
+  (
+    'resume_extract',
+    $prompt$把输入原文中明确出现的内容忠实整理为结构化简历信息。
+1. 只做信息抽取与字段归位，禁止润色、补写、推断或按岗位优化。
+2. 原文未出现的公司、日期、技能、成果一律留空。
+3. 实习/工作中明确出现的公司名必须写入 company，不得整段塞进 description。$prompt$,
+    now(), now()
+  ),
+  (
+    'project_optimize',
+    $prompt$优化单条项目经历，必须相对原文有实质改写并贴合目标岗位。
+1. 突出本人角色、关键动作、方法工具与交付物。
+2. 禁止只换同义词；有明确结果才写结果，不虚构量化业绩。$prompt$,
+    now(), now()
+  ),
+  (
+    'summary_optimize',
+    $prompt$重写个人评价，形成清晰、可面试的岗位能力画像。
+1. 必须实质改写，禁止同义反复。
+2. 回答是谁、核心能力、为何匹配、差异化优势。$prompt$,
+    now(), now()
+  ),
+  (
+    'skills_optimize',
+    $prompt$整理并优化技能列表。
+1. 统一标准名、去重、按岗位相关度重排，禁止原样复制。
+2. 可补岗位常见基础硬技能；软技能不作标签。$prompt$,
+    now(), now()
+  ),
+  (
+    'internship_optimize',
+    $prompt$优化单条实习经历，必须实质改写。
+1. 写清参与范围、动作、工具与交付物。
+2. 不编造业务结果或量化提升。$prompt$,
+    now(), now()
+  ),
+  (
+    'work_experience_optimize',
+    $prompt$优化单条工作经历，必须实质改写。
+1. 升级为清晰的任务、个人动作、方法工具与交付表达。
+2. 有明确结果才写结果；保持贡献程度准确。$prompt$,
+    now(), now()
+  ),
+  (
+    'jd_match',
+    $prompt$分析简历与岗位要求的匹配度。
+1. 区分直接匹配、可迁移匹配与简历未体现。
+2. 缺口只建议补充证据，不得写成已具备；本任务不改写简历。$prompt$,
+    now(), now()
+  ),
+  (
+    'score',
+    $prompt$按通用评分口径为简历打分。
+1. 综合完整度、技能相关性、经历证据、结构与文本规范。
+2. 不因敏感信息缺失或关键词堆砌加减分。$prompt$,
+    now(), now()
+  ),
+  (
+    'pdf_optimize',
+    $prompt$基于上传简历原文优化完整简历。
+1. 逐条优化已有模块，确保优化前后有实质差异。
+2. 信息过少时可基于岗位生成示意内容并明确提示用户修改。$prompt$,
+    now(), now()
+  ),
+  (
+    'jd_resume_optimize',
+    $prompt$按岗位JD优化完整简历，适当重塑为岗位所需样子。
+1. 重写评价、技能与每一条经历；保留真实姓名、联系方式、教育与已有公司名。
+2. 信息过少时基于岗位生成示意内容，并在优化说明首条提示用户按真实经历修改。
+3. 禁止优化后几乎无变化。$prompt$,
+    now(), now()
+  ),
+  (
+    'pdf_jd_optimize',
+    $prompt$结合简历原文与岗位JD优化完整简历。
+1. 保留原文事实专有名词，按岗位对齐表达并逐条优化经历。
+2. 信息过少时允许示意补全并披露；禁止无实质改动。$prompt$,
+    now(), now()
+  ),
+  (
+    'jd_image_extract',
+    $prompt$忠实转录图片中的岗位招聘信息为纯文本。
+1. 不润色、不补全、不推断。
+2. 看不清处如实标注，不得猜测。$prompt$,
+    now(), now()
+  )
+ON CONFLICT (task_type) DO UPDATE SET
+  instruction = EXCLUDED.instruction,
+  update_time = now();
+
 INSERT INTO public.ai_model (
   name, model_key, task_type, provider, model_type, api_key_env,
   input_price_per_million, cached_input_price_per_million, output_price_per_million,

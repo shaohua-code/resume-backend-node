@@ -149,6 +149,7 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | 主键 | `id` (BIGSERIAL) |
 | 核心字段 | `task_type`（唯一）、`instruction` |
 | 说明 | 仅业务指令；JSON Schema/输出格式永不入库，由代码锁定追加 |
+| 种子数据 | `init.sql` 与 `seed_ai_task_prompt.sql` 按 `CODE_DEFAULT_INSTRUCTIONS` 幂等写入 |
 | 代码路径 | `services/user/userAiConfig.service.js`、`services/ai/ai.promptResolve.js` |
 
 ### user_ai_task_prompt — 用户业务提示词覆盖
