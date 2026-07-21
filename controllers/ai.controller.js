@@ -100,7 +100,7 @@ async function generate(req, res) {
     const aiOptions = getAiOptions(req, { inputMode: isLazy ? 'lazy' : 'form' });
     const userInput = isLazy ? body : JSON.stringify(body);
     const { data, meta } = await aiService.generateResume(userInput, aiOptions);
-    if (!data || Object.keys(data).length === 0) {
+    if (!data?.resume || Object.keys(data.resume).length === 0) {
       await recordAiCall(req, taskType, model, false, 'AI生成简历失败，请重试');
       return error(res, 500, 'AI生成简历失败，请重试');
     }
@@ -126,7 +126,7 @@ async function generateStream(req, res) {
     const { data, meta } = await aiService.generateResumeStream(userInput, aiOptions, (chunk) => {
       sendEvent({ chunk });
     });
-    if (!data || Object.keys(data).length === 0) {
+    if (!data?.resume || Object.keys(data.resume).length === 0) {
       await recordAiCall(req, taskType, model, false, 'AI生成简历失败，请重试');
       sendEvent({ error: 'AI生成简历失败，请重试' });
       return res.end();

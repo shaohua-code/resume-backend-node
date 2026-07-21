@@ -59,7 +59,7 @@ const LOCKED_TAILS = {
     COMMON_INPUT_BOUNDARY,
     `## 用户信息\n<user_data>\n{user_input}\n</user_data>`,
     COMMON_SCREENING_QUALITY_GATE,
-    COMMON_DIRECT_RESUME_OUTPUT,
+    COMMON_WRAPPED_RESUME_OUTPUT,
   ),
   lazy_generate: composePrompt(
     COMMON_RESUME_SCHEMA,
@@ -67,7 +67,7 @@ const LOCKED_TAILS = {
     COMMON_INPUT_BOUNDARY,
     `## 输入数据\n<target_position>{target_position}</target_position>\n<user_data>\n{user_input}\n</user_data>`,
     COMMON_SCREENING_QUALITY_GATE,
-    COMMON_DIRECT_RESUME_OUTPUT,
+    COMMON_WRAPPED_RESUME_OUTPUT,
   ),
   [AI_TASK.RESUME_EXTRACT]: composePrompt(
     `## 输出JSON结构

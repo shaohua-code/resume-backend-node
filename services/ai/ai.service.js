@@ -776,15 +776,29 @@ async function resolveGeneratePrompt(bodyOrString, options = {}) {
 
 /**
  * AI 生成简历（非流式）
+ * 统一返回 { resume, optimization_notes }，亮点由模型总结
  */
 async function generateResume(userInput, options = {}) {
   const prompt = await resolveGeneratePrompt(userInput, options);
   const { content, usage, model, cost } = await callDeepseek(prompt, modelCallOptions(AI_TASK.RESUME_GENERATE, options));
-  return { data: extractJson(content), meta: { model, usage, cost } };
+  const parsed = extractJson(content);
+  if (!parsed || Object.keys(parsed).length === 0) {
+    return { data: { resume: {}, optimization_notes: [] }, meta: { model, usage, cost } };
+  }
+  const rawResume = parsed.resume && typeof parsed.resume === 'object' ? parsed.resume : parsed;
+  const resume = normalizePdfResume(rawResume);
+  return {
+    data: {
+      resume: hasResumeContent(resume) ? resume : {},
+      optimization_notes: Array.isArray(parsed.optimization_notes) ? parsed.optimization_notes.filter(Boolean) : [],
+    },
+    meta: { model, usage, cost },
+  };
 }
 
 /**
  * 流式 AI 生成简历
+ * 统一返回 { resume, optimization_notes }，亮点由模型总结
  */
 async function generateResumeStream(userInput, options = {}, onChunk) {
   const prompt = await resolveGeneratePrompt(userInput, options);
@@ -793,7 +807,19 @@ async function generateResumeStream(userInput, options = {}, onChunk) {
     modelCallOptions(AI_TASK.RESUME_GENERATE, options),
     onChunk,
   );
-  return { data: extractJson(content), meta: { model, usage, cost } };
+  const parsed = extractJson(content);
+  if (!parsed || Object.keys(parsed).length === 0) {
+    return { data: { resume: {}, optimization_notes: [] }, meta: { model, usage, cost } };
+  }
+  const rawResume = parsed.resume && typeof parsed.resume === 'object' ? parsed.resume : parsed;
+  const resume = normalizePdfResume(rawResume);
+  return {
+    data: {
+      resume: hasResumeContent(resume) ? resume : {},
+      optimization_notes: Array.isArray(parsed.optimization_notes) ? parsed.optimization_notes.filter(Boolean) : [],
+    },
+    meta: { model, usage, cost },
+  };
 }
 
 /**
