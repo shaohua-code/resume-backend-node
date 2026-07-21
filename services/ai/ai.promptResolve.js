@@ -27,6 +27,7 @@ const {
   COMMON_WRAPPED_RESUME_SCHEMA,
   COMMON_DIRECT_RESUME_OUTPUT,
   COMMON_WRAPPED_RESUME_OUTPUT,
+  COMMON_JD_ALIGNMENT_RULES,
   COMMON_INPUT_BOUNDARY,
   COMMON_SCREENING_QUALITY_GATE,
   COMMON_FAIR_RECRUITING_RULES,
@@ -124,12 +125,15 @@ const LOCKED_TAILS = {
     `## 输入数据\n<target_position>{target_position}</target_position>\n<resume_source>\n{pdf_text}\n</resume_source>`,
   ),
   [AI_TASK.JD_RESUME_OPTIMIZE]: composePrompt(
+    // 事实优先规则锁定在尾段，管理员改业务文案也无法去掉「不能太虚假」约束
+    COMMON_JD_ALIGNMENT_RULES,
     COMMON_WRAPPED_RESUME_OUTPUT,
     COMMON_WRAPPED_RESUME_SCHEMA,
     COMMON_INPUT_BOUNDARY,
     `## 输入数据\n<job_description>\n{jd_text}\n</job_description>\n<resume_json>\n{resume_json}\n</resume_json>`,
   ),
   [AI_TASK.PDF_JD_OPTIMIZE]: composePrompt(
+    COMMON_JD_ALIGNMENT_RULES,
     COMMON_WRAPPED_RESUME_OUTPUT,
     COMMON_WRAPPED_RESUME_SCHEMA,
     COMMON_INPUT_BOUNDARY,
