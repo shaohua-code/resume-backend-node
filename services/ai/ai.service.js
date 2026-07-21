@@ -772,52 +772,131 @@ async function resolveGeneratePrompt(bodyOrString, options = {}) {
   return buildTaskPrompt(AI_TASK.RESUME_GENERATE, { user_input: userInput }, options);
 }
 
+/**
+ * 规范化亮点文案列表，过滤空项与「无需修改」类套话
+ */
+function normalizeNoteList(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+    .filter((note) => !/无需修改|已较完善|微调即可|暂无调整/.test(note));
+}
+
+/**
+ * 从模型 JSON 中尽量提取 optimization_notes（兼容别名与嵌套）
+ */
+function pickOptimizationNotes(parsed) {
+  if (!parsed || typeof parsed !== 'object') return [];
+  const candidates = [
+    parsed.optimization_notes,
+    parsed.optimizationNotes,
+    parsed.notes,
+    parsed.highlights,
+    parsed['优化亮点'],
+    parsed['本次优化亮点'],
+    parsed.resume?.optimization_notes,
+    parsed.resume?.optimizationNotes,
+    parsed.resume?.notes,
+  ];
+  for (const candidate of candidates) {
+    const notes = normalizeNoteList(candidate);
+    if (notes.length) return notes.slice(0, 5);
+  }
+  return [];
+}
+
+/**
+ * 模型未返回亮点时，按简历内容生成后端兜底说明（保证前端「本次优化亮点」可展示）
+ */
+function buildFallbackOptimizationNotes(resume, mode = 'generate') {
+  const data = resume || {};
+  const notes = [];
+  const verb = mode === 'optimize' ? '优化' : '生成';
+  if (String(data.summary || '').trim()) {
+    notes.push(`已${verb}个人评价，突出与目标岗位的匹配表达`);
+  }
+  if (Array.isArray(data.skills) && data.skills.length) {
+    notes.push(`已整理 ${data.skills.length} 项核心技能关键词`);
+  }
+  const experienceCount =
+    (Array.isArray(data.projects) ? data.projects.length : 0) +
+    (Array.isArray(data.internships) ? data.internships.length : 0) +
+    (Array.isArray(data.work_experiences) ? data.work_experiences.length : 0);
+  if (experienceCount > 0) {
+    notes.push('已补强项目/实习/工作经历的职责与交付描述');
+  }
+  if (Array.isArray(data.educations) && data.educations.length) {
+    notes.push('已规范教育背景字段结构，便于招聘方快速扫描');
+  }
+  if (String(data.target_position || '').trim()) {
+    notes.push(`已围绕「${data.target_position}」对齐简历表达侧重点`);
+  }
+  while (notes.length < 3) {
+    notes.push(
+      mode === 'optimize'
+        ? '已按招聘筛选口径提升简历可读性与岗位相关性'
+        : '已按目标岗位补全可投递的完整简历结构',
+    );
+  }
+  return notes.slice(0, 5);
+}
+
+/**
+ * 统一解包 { resume, optimization_notes }；扁平根对象也可恢复简历，并兜底亮点
+ */
+function unpackWrappedResumeResult(parsed, mode = 'generate') {
+  if (!parsed || typeof parsed !== 'object' || Object.keys(parsed).length === 0) {
+    return { resume: {}, optimization_notes: [] };
+  }
+  const resume = normalizePdfResume(parsed);
+  let notes = pickOptimizationNotes(parsed);
+  if (!notes.length && hasResumeContent(resume)) {
+    notes = buildFallbackOptimizationNotes(resume, mode);
+  }
+  return {
+    resume: hasResumeContent(resume) ? resume : {},
+    optimization_notes: notes,
+  };
+}
+
 // ========== 对外服务方法 ==========
 
 /**
  * AI 生成简历（非流式）
- * 统一返回 { resume, optimization_notes }，亮点由模型总结
+ * 统一返回 { resume, optimization_notes }，亮点由模型总结；缺失时后端兜底
  */
 async function generateResume(userInput, options = {}) {
   const prompt = await resolveGeneratePrompt(userInput, options);
-  const { content, usage, model, cost } = await callDeepseek(prompt, modelCallOptions(AI_TASK.RESUME_GENERATE, options));
+  const { content, usage, model, cost } = await callDeepseek(prompt, {
+    ...modelCallOptions(AI_TASK.RESUME_GENERATE, options),
+    // 强制 JSON 对象，提升 resume + optimization_notes 包装成功率
+    responseFormat: { type: 'json_object' },
+  });
   const parsed = extractJson(content);
-  if (!parsed || Object.keys(parsed).length === 0) {
-    return { data: { resume: {}, optimization_notes: [] }, meta: { model, usage, cost } };
-  }
-  const rawResume = parsed.resume && typeof parsed.resume === 'object' ? parsed.resume : parsed;
-  const resume = normalizePdfResume(rawResume);
   return {
-    data: {
-      resume: hasResumeContent(resume) ? resume : {},
-      optimization_notes: Array.isArray(parsed.optimization_notes) ? parsed.optimization_notes.filter(Boolean) : [],
-    },
+    data: unpackWrappedResumeResult(parsed, 'generate'),
     meta: { model, usage, cost },
   };
 }
 
 /**
  * 流式 AI 生成简历
- * 统一返回 { resume, optimization_notes }，亮点由模型总结
+ * 统一返回 { resume, optimization_notes }，亮点由模型总结；缺失时后端兜底
  */
 async function generateResumeStream(userInput, options = {}, onChunk) {
   const prompt = await resolveGeneratePrompt(userInput, options);
   const { content, usage, model, cost } = await callDeepseekStream(
     prompt,
-    modelCallOptions(AI_TASK.RESUME_GENERATE, options),
+    {
+      ...modelCallOptions(AI_TASK.RESUME_GENERATE, options),
+      responseFormat: { type: 'json_object' },
+    },
     onChunk,
   );
   const parsed = extractJson(content);
-  if (!parsed || Object.keys(parsed).length === 0) {
-    return { data: { resume: {}, optimization_notes: [] }, meta: { model, usage, cost } };
-  }
-  const rawResume = parsed.resume && typeof parsed.resume === 'object' ? parsed.resume : parsed;
-  const resume = normalizePdfResume(rawResume);
   return {
-    data: {
-      resume: hasResumeContent(resume) ? resume : {},
-      optimization_notes: Array.isArray(parsed.optimization_notes) ? parsed.optimization_notes.filter(Boolean) : [],
-    },
+    data: unpackWrappedResumeResult(parsed, 'generate'),
     meta: { model, usage, cost },
   };
 }
@@ -1132,15 +1211,8 @@ async function optimizeFromPdfText(pdfText, targetPosition = '', options = {}) {
   }, options);
   const { content, usage, model, cost } = await callDeepseek(prompt, modelCallOptions(AI_TASK.PDF_OPTIMIZE, options));
   const parsed = extractJson(content);
-  if (!parsed || Object.keys(parsed).length === 0) {
-    return { data: { resume: {}, optimization_notes: [] }, meta: { model, usage, cost } };
-  }
-  const resume = normalizePdfResume(parsed);
   return {
-    data: {
-      resume: hasResumeContent(resume) ? resume : {},
-      optimization_notes: parsed.optimization_notes || parsed.resume?.optimization_notes || [],
-    },
+    data: unpackWrappedResumeResult(parsed, 'optimize'),
     meta: { model, usage, cost },
   };
 }
@@ -1193,19 +1265,15 @@ async function optimizeFromPdfTextStream(pdfText, targetPosition = '', options =
   }, options);
   const { content, usage, model, cost } = await callDeepseekStream(
     prompt,
-    modelCallOptions(AI_TASK.PDF_OPTIMIZE, options),
+    {
+      ...modelCallOptions(AI_TASK.PDF_OPTIMIZE, options),
+      responseFormat: { type: 'json_object' },
+    },
     onChunk,
   );
   const parsed = extractJson(content);
-  if (!parsed || Object.keys(parsed).length === 0) {
-    return { data: { resume: {}, optimization_notes: [] }, meta: { model, usage, cost } };
-  }
-  const resume = normalizePdfResume(parsed);
   return {
-    data: {
-      resume: hasResumeContent(resume) ? resume : {},
-      optimization_notes: parsed.optimization_notes || parsed.resume?.optimization_notes || [],
-    },
+    data: unpackWrappedResumeResult(parsed, 'optimize'),
     meta: { model, usage, cost },
   };
 }
@@ -1220,20 +1288,15 @@ async function optimizePdfByJdStream(pdfText, jdText = '', options = {}, onChunk
   }, options);
   const { content, usage, model, cost } = await callDeepseekStream(
     prompt,
-    modelCallOptions(AI_TASK.PDF_JD_OPTIMIZE, options),
+    {
+      ...modelCallOptions(AI_TASK.PDF_JD_OPTIMIZE, options),
+      responseFormat: { type: 'json_object' },
+    },
     onChunk,
   );
   const parsed = extractJson(content);
-  if (!parsed || Object.keys(parsed).length === 0) {
-    return { data: { resume: {}, optimization_notes: [] }, meta: { model, usage, cost } };
-  }
-  const rawResume = parsed.resume && typeof parsed.resume === 'object' ? parsed.resume : parsed;
-  const resume = normalizePdfResume(rawResume);
   return {
-    data: {
-      resume: hasResumeContent(resume) ? resume : {},
-      optimization_notes: parsed.optimization_notes || [],
-    },
+    data: unpackWrappedResumeResult(parsed, 'optimize'),
     meta: { model, usage, cost },
   };
 }
@@ -1251,21 +1314,15 @@ async function optimizeResumeByJdStream(resumeJson, jdText = '', options = {}, o
   }, options);
   const { content, usage, model, cost } = await callDeepseekStream(
     prompt,
-    modelCallOptions(AI_TASK.JD_RESUME_OPTIMIZE, options),
+    {
+      ...modelCallOptions(AI_TASK.JD_RESUME_OPTIMIZE, options),
+      responseFormat: { type: 'json_object' },
+    },
     onChunk,
   );
   const parsed = extractJson(content);
-  if (!parsed || Object.keys(parsed).length === 0) {
-    return { data: { resume: {}, optimization_notes: [] }, meta: { model, usage, cost } };
-  }
-  // 兼容 AI 直接返回 resume 根对象或嵌套在 resume 字段内
-  const rawResume = parsed.resume && typeof parsed.resume === 'object' ? parsed.resume : parsed;
-  const resume = normalizePdfResume(rawResume);
   return {
-    data: {
-      resume: hasResumeContent(resume) ? resume : {},
-      optimization_notes: parsed.optimization_notes || [],
-    },
+    data: unpackWrappedResumeResult(parsed, 'optimize'),
     meta: { model, usage, cost },
   };
 }

@@ -24,7 +24,7 @@ const {
   JD_IMAGE_EXTRACT_PROMPT,
   CODE_DEFAULT_INSTRUCTIONS,
   composePrompt,
-  COMMON_RESUME_SCHEMA,
+  COMMON_WRAPPED_RESUME_SCHEMA,
   COMMON_DIRECT_RESUME_OUTPUT,
   COMMON_WRAPPED_RESUME_OUTPUT,
   COMMON_INPUT_BOUNDARY,
@@ -53,21 +53,22 @@ const FULL_PROMPTS = {
 
 /** 覆盖指令时追加的锁定尾段：含输入占位与输出契约，永不下发给前端 */
 const LOCKED_TAILS = {
+  // 输出包装约束放最前，避免管理员指令覆盖后模型仍输出扁平简历根对象
   [AI_TASK.RESUME_GENERATE]: composePrompt(
-    COMMON_RESUME_SCHEMA,
+    COMMON_WRAPPED_RESUME_OUTPUT,
+    COMMON_WRAPPED_RESUME_SCHEMA,
     COMMON_FAIR_RECRUITING_RULES,
     COMMON_INPUT_BOUNDARY,
     `## 用户信息\n<user_data>\n{user_input}\n</user_data>`,
     COMMON_SCREENING_QUALITY_GATE,
-    COMMON_WRAPPED_RESUME_OUTPUT,
   ),
   lazy_generate: composePrompt(
-    COMMON_RESUME_SCHEMA,
+    COMMON_WRAPPED_RESUME_OUTPUT,
+    COMMON_WRAPPED_RESUME_SCHEMA,
     COMMON_FAIR_RECRUITING_RULES,
     COMMON_INPUT_BOUNDARY,
     `## 输入数据\n<target_position>{target_position}</target_position>\n<user_data>\n{user_input}\n</user_data>`,
     COMMON_SCREENING_QUALITY_GATE,
-    COMMON_WRAPPED_RESUME_OUTPUT,
   ),
   [AI_TASK.RESUME_EXTRACT]: composePrompt(
     `## 输出JSON结构
@@ -117,22 +118,22 @@ const LOCKED_TAILS = {
     `## 输出强制约束\n只输出可 JSON.parse 的评分对象。`,
   ),
   [AI_TASK.PDF_OPTIMIZE]: composePrompt(
-    COMMON_RESUME_SCHEMA,
     COMMON_WRAPPED_RESUME_OUTPUT,
+    COMMON_WRAPPED_RESUME_SCHEMA,
     COMMON_INPUT_BOUNDARY,
-    `## 输入数据\n<pdf_text>\n{pdf_text}\n</pdf_text>`,
+    `## 输入数据\n<target_position>{target_position}</target_position>\n<resume_source>\n{pdf_text}\n</resume_source>`,
   ),
   [AI_TASK.JD_RESUME_OPTIMIZE]: composePrompt(
-    COMMON_RESUME_SCHEMA,
     COMMON_WRAPPED_RESUME_OUTPUT,
+    COMMON_WRAPPED_RESUME_SCHEMA,
     COMMON_INPUT_BOUNDARY,
-    `## 输入数据\n<resume_json>\n{resume_json}\n</resume_json>\n<jd_text>\n{jd_text}\n</jd_text>`,
+    `## 输入数据\n<job_description>\n{jd_text}\n</job_description>\n<resume_json>\n{resume_json}\n</resume_json>`,
   ),
   [AI_TASK.PDF_JD_OPTIMIZE]: composePrompt(
-    COMMON_RESUME_SCHEMA,
     COMMON_WRAPPED_RESUME_OUTPUT,
+    COMMON_WRAPPED_RESUME_SCHEMA,
     COMMON_INPUT_BOUNDARY,
-    `## 输入数据\n<pdf_text>\n{pdf_text}\n</pdf_text>\n<jd_text>\n{jd_text}\n</jd_text>`,
+    `## 输入数据\n<job_description>\n{jd_text}\n</job_description>\n<resume_source>\n{pdf_text}\n</resume_source>`,
   ),
   [AI_TASK.JD_IMAGE_EXTRACT]: composePrompt(
     `## 输出强制约束\n仅输出提取到的纯文本，不要 JSON、markdown 代码块或解释。`,
