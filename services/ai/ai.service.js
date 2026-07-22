@@ -24,6 +24,7 @@ const {
   extractTargetPosition,
   extractTargetPositionFromText,
 } = require('./resume-content');
+const { enrichProjectsFromSource } = require('./resume-projects');
 const { JD_IMAGE_EXTRACT_PROMPT } = require('./ai.prompts');
 const { resolveFormattedPrompt } = require('./ai.promptResolve');
 
@@ -147,6 +148,8 @@ function consumeChatCompletionSse(responseStream, onChunk) {
     let full = '';
     let remainder = '';
     let usage = {};
+    // 记录结束原因：length 表示输出被 max_tokens 截断
+    let finishReason = '';
 
     const handleSseLine = (line) => {
       const trimmed = String(line || '').trim();
@@ -156,8 +159,10 @@ function consumeChatCompletionSse(responseStream, onChunk) {
       try {
         const parsed = JSON.parse(data);
         if (parsed.usage) usage = parsed.usage;
+        const choice = parsed.choices?.[0] || {};
+        if (choice.finish_reason) finishReason = choice.finish_reason;
         // 忽略 reasoning_content，避免思考过程污染结构化 JSON
-        const content = parsed.choices?.[0]?.delta?.content || '';
+        const content = choice.delta?.content || '';
         if (content) {
           full += content;
           if (typeof onChunk === 'function') onChunk(content, full);
@@ -178,7 +183,7 @@ function consumeChatCompletionSse(responseStream, onChunk) {
       // 冲刷解码器中未完成的多字节字符，并处理最后半行
       remainder += decoder.end();
       if (remainder.trim()) handleSseLine(remainder);
-      resolve({ content: full, usage });
+      resolve({ content: full, usage, finishReason });
     });
     responseStream.on('error', reject);
   });
@@ -213,9 +218,9 @@ async function callChatCompletionStream(prompt, runtime, onChunk, callOptions = 
     responseType: 'stream',
   });
 
-  const { content, usage } = await consumeChatCompletionSse(response.data, onChunk);
+  const { content, usage, finishReason } = await consumeChatCompletionSse(response.data, onChunk);
   const meta = await buildMeta(model, usage);
-  return { content, ...meta };
+  return { content, finishReason, ...meta };
 }
 
 async function callDeepseekStream(prompt, options = {}, onChunk) {
@@ -919,13 +924,13 @@ async function extractResumeFromTextStream(resumeText, options = {}, onChunk) {
   const prompt = await buildTaskPrompt(AI_TASK.RESUME_EXTRACT, {
     resume_source: sourceText,
   }, options);
-  // 识别任务要稳定 JSON：低温 + 足够输出窗口 + JSON 模式
-  const { content, usage, model, cost } = await callDeepseekStream(
+  // 识别任务要稳定 JSON：低温 + 更大输出窗口（完整提取易超长）+ JSON 模式
+  const { content, usage, model, cost, finishReason } = await callDeepseekStream(
     prompt,
     {
       ...modelCallOptions(AI_TASK.RESUME_EXTRACT, options),
-      temperature: 0.2,
-      max_tokens: 8192,
+      temperature: 0.1,
+      max_tokens: 12288,
       responseFormat: { type: 'json_object' },
     },
     onChunk,
@@ -933,8 +938,13 @@ async function extractResumeFromTextStream(resumeText, options = {}, onChunk) {
   // 区分解析失败与合法空结果，避免 JSON 瑕疵被误报成“无简历信息”。
   const { ok, data: parsed } = extractJsonSafe(content);
   if (!ok) {
-    const err = new Error('AI 返回内容无法解析为结构化简历，请重试');
-    err.code = 'RESUME_JSON_PARSE_FAILED';
+    const truncated = finishReason === 'length';
+    const err = new Error(
+      truncated
+        ? '识别结果过长被截断，请缩短原文后重试或更换模型'
+        : 'AI 返回内容无法解析为结构化简历，请重试',
+    );
+    err.code = truncated ? 'RESUME_JSON_TRUNCATED' : 'RESUME_JSON_PARSE_FAILED';
     // 便于排查：记录截断预览，避免把整份简历打进日志
     err.detail = String(content || '').slice(0, 240);
     throw err;
@@ -949,6 +959,8 @@ async function extractResumeFromTextStream(resumeText, options = {}, onChunk) {
   if (!resume.target_position) {
     resume.target_position = extractTargetPositionFromText(sourceText);
   }
+  // 用原文「项目简介/项目职责」块回填：补回漏掉的首条项目与完整职责列表
+  resume.projects = enrichProjectsFromSource(sourceText, resume.projects);
   return {
     data: { resume: hasResumeContent(resume) ? resume : {} },
     meta: { model, usage, cost },

@@ -16,7 +16,8 @@ const generate = [
 ]
 
 /**
- * 纯文字识别只接收有限长度的原始简历文本，避免误把生成表单提交到该接口。
+ * 纯文字识别接收原始简历文本。
+ * 上限与 PDF 解析对齐，避免长简历后半段被接口拦掉。
  */
 const extractResume = [
   body('raw_text')
@@ -24,8 +25,8 @@ const extractResume = [
     .withMessage('raw_text 必须是字符串')
     .bail()
     .trim()
-    .isLength({ min: 20, max: 8000 })
-    .withMessage('raw_text 长度必须在 20 到 8000 个字符之间'),
+    .isLength({ min: 20, max: 50000 })
+    .withMessage('raw_text 长度必须在 20 到 50000 个字符之间'),
 ]
 
 /**

@@ -169,7 +169,7 @@ async function uploadRecognizeStream(req, res) {
       sendEvent({ done: true, data: { resume: data.resume } });
       return res.end();
     } catch (e) {
-      if (['CONFIG_MISSING', 'AI_LIMIT_EXCEEDED', 'INSUFFICIENT_BALANCE', 'RESUME_TEXT_TOO_SHORT', 'RESUME_JSON_PARSE_FAILED'].includes(e.code)) {
+      if (['CONFIG_MISSING', 'AI_LIMIT_EXCEEDED', 'INSUFFICIENT_BALANCE', 'RESUME_TEXT_TOO_SHORT', 'RESUME_JSON_PARSE_FAILED', 'RESUME_JSON_TRUNCATED'].includes(e.code)) {
         sendEvent({ error: e.message, code: e.code });
         return res.end();
       }
@@ -213,7 +213,7 @@ async function existingRecognizeStream(req, res) {
     sendEvent({ done: true, data: { resume: data.resume } });
     return res.end();
   } catch (e) {
-    if (['CONFIG_MISSING', 'AI_LIMIT_EXCEEDED', 'INSUFFICIENT_BALANCE', 'RESUME_TEXT_TOO_SHORT', 'RESUME_JSON_PARSE_FAILED'].includes(e.code)) {
+    if (['CONFIG_MISSING', 'AI_LIMIT_EXCEEDED', 'INSUFFICIENT_BALANCE', 'RESUME_TEXT_TOO_SHORT', 'RESUME_JSON_PARSE_FAILED', 'RESUME_JSON_TRUNCATED'].includes(e.code)) {
       sendEvent({ error: e.message, code: e.code });
       return res.end();
     }

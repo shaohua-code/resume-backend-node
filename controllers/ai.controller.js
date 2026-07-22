@@ -64,7 +64,7 @@ function respondAiError(res, e, { sendEvent, recordFn } = {}) {
     return error(res, 400, e.message);
   }
   // 识别链路业务错误：直接透传文案，避免包一层“AI服务调用失败”。
-  if (['RESUME_TEXT_TOO_SHORT', 'RESUME_JSON_PARSE_FAILED'].includes(e.code)) {
+  if (['RESUME_TEXT_TOO_SHORT', 'RESUME_JSON_PARSE_FAILED', 'RESUME_JSON_TRUNCATED'].includes(e.code)) {
     if (sendEvent) {
       sendEvent({ error: e.message, code: e.code });
       return res.end();

@@ -72,9 +72,11 @@ const LOCKED_TAILS = {
     COMMON_SCREENING_QUALITY_GATE,
   ),
   [AI_TASK.RESUME_EXTRACT]: composePrompt(
+    // 覆盖管理员指令时仍锁定完整性与字段契约，避免漏段/摘要
     `## 输出JSON结构
 根对象字段与标准简历 Schema 一致；internships/work_experiences 每项必须使用英文字段 company、position（及工作的 department），禁止中文键名；缺失字符串填""，缺失数组填[]；不得输出 null 或额外字段。
-公司名若在原文出现（含经历首行「公司 | 职位 | 时间」），必须写入对应记录的 company。`,
+公司名若在原文出现（含经历首行「公司 | 职位 | 时间」），必须写入对应记录的 company。
+必须完整提取原文全部教育/项目/实习/工作条目，禁止漏条、合并或多段只留一条；description 保留原文要点，禁止概括替代。`,
     `## 输入数据\n<resume_source>\n{resume_source}\n</resume_source>`,
     COMMON_DIRECT_RESUME_OUTPUT,
   ),

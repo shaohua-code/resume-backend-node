@@ -11,6 +11,9 @@ const {
   PDFS_DIR,
 } = require('../../lib/uploadPaths')
 
+// 识别/优化共用上限：旧值 8000 会截掉后半段经历，导致「识别不完整」
+const DEFAULT_PDF_TEXT_MAX_LENGTH = 50000
+
 function ensureUploadDir() {
   ensureUploadDirs()
 }
@@ -21,12 +24,19 @@ async function readPdfText(filePath) {
   return (pdfData.text || '').trim()
 }
 
-async function parsePdfFile(filePath, maxLength = 8000) {
+/**
+ * 解析 PDF 文本。
+ * @param {string} filePath
+ * @param {number} maxLength 安全上限；传 0 表示不截断（仍受模型上下文约束）
+ */
+async function parsePdfFile(filePath, maxLength = DEFAULT_PDF_TEXT_MAX_LENGTH) {
   const text = await readPdfText(filePath)
   if (!text) {
     throw Object.assign(new Error('PDF 内容为空或无法解析（可能是扫描版图片PDF）'), { statusCode: 400 })
   }
-  return text.length > maxLength ? text.slice(0, maxLength) : text
+  // maxLength<=0：保留全文，避免长简历后半段进不了模型
+  if (!maxLength || maxLength <= 0 || text.length <= maxLength) return text
+  return text.slice(0, maxLength)
 }
 
 function getFileMeta(userId) {
@@ -75,4 +85,5 @@ module.exports = {
   getFileMeta,
   deleteUserPdf,
   buildMulterConfig,
+  DEFAULT_PDF_TEXT_MAX_LENGTH,
 }
