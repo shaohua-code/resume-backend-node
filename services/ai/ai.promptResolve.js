@@ -108,17 +108,28 @@ const LOCKED_TAILS = {
   [AI_TASK.JD_MATCH]: composePrompt(
     COMMON_INPUT_BOUNDARY,
     `## 输入数据\n<resume_content>\n{resume_content}\n</resume_content>\n<jd_text>\n{jd_text}\n</jd_text>`,
-    `## 输出强制约束\n只输出可 JSON.parse 的匹配分析结果对象，不得输出 markdown。`,
+    `## 输出强制约束
+即使输入只有简短岗位名称，也要把它作为目标岗位完成基础证据匹配；只有输入为空白时才返回 0 分。
+只输出可 JSON.parse 的纯 JSON 对象，不得输出 markdown，字段严格为：
+{"match_score":0,"match_advantages":[],"position_gaps":[],"experience_gap":"","keywords":[],"missing_skills":[],"suggestions":[]}
+match_score 为 0-100 整数；六个分析字段必须依据简历和岗位原文填写，数组字段必须是字符串数组，suggestions 至少 1 条。`,
   ),
   [AI_TASK.SCORE]: composePrompt(
     COMMON_INPUT_BOUNDARY,
     `## 输入数据\n<resume_content>\n{resume_content}\n</resume_content>`,
-    `## 输出强制约束\n只输出可 JSON.parse 的评分对象。`,
+    `## 输出强制约束
+只输出可 JSON.parse 的纯 JSON 对象，不得输出 markdown，字段严格为：
+{"content_completeness":0,"skill_match":0,"project_quality":0,"resume_structure":0,"format_quality":0,"total":0,"summary":""}
+五个维度依次不得超过 20、20、30、15、15，均为整数；total 必须严格等于五项之和；summary 用中文概括评分依据。`,
   ),
   score_stream: composePrompt(
     COMMON_INPUT_BOUNDARY,
     `## 输入数据\n<resume_content>\n{resume_content}\n</resume_content>`,
-    `## 输出强制约束\n只输出可 JSON.parse 的评分对象。`,
+    `## 输出强制约束
+先输出自然中文评分报告，依次包含总分、内容完整度、岗位匹配度、经历质量、简历结构、排版规范和至少 3 条优化建议，不使用代码块。
+最后另起一行输出内部机器结果：
+<SCORE_JSON>{"content_completeness":0,"skill_match":0,"project_quality":0,"resume_structure":0,"format_quality":0,"total":0,"summary":""}</SCORE_JSON>
+五个维度依次不得超过 20、20、30、15、15，均为整数；total 必须严格等于五项之和；标签结束后不得输出其他内容。`,
   ),
   [AI_TASK.PDF_OPTIMIZE]: composePrompt(
     COMMON_WRAPPED_RESUME_OUTPUT,

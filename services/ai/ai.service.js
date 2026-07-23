@@ -27,6 +27,11 @@ const {
 const { enrichProjectsFromSource } = require('./resume-projects');
 const { JD_IMAGE_EXTRACT_PROMPT } = require('./ai.prompts');
 const { resolveFormattedPrompt } = require('./ai.promptResolve');
+const {
+  normalizeScoreResult,
+  normalizeJdMatchResult,
+  createScoreVisibleChunkHandler,
+} = require('./ai.resultNormalize');
 
 /** 组装任务 Prompt：支持用户/管理员指令覆盖，输出格式始终由代码锁定 */
 async function buildTaskPrompt(taskType, vars, options = {}, promptKey) {
@@ -1080,15 +1085,14 @@ async function optimizeWorkExperienceStream(workExp, resume, targetPosition = ''
  */
 async function matchJd(resumeContent, jdText, options = {}) {
   const prompt = await buildTaskPrompt(AI_TASK.JD_MATCH, { resume_content: resumeContent, jd_text: jdText }, options);
-  const { content, usage, model, cost } = await callDeepseek(prompt, modelCallOptions(AI_TASK.JD_MATCH, options));
+  // 同步分析启用 JSON 模式，降低模型夹带说明文字导致结构化字段丢失的概率。
+  const { content, usage, model, cost } = await callDeepseek(prompt, {
+    ...modelCallOptions(AI_TASK.JD_MATCH, options),
+    responseFormat: { type: 'json_object' },
+  });
   const parsed = extractJson(content);
   return {
-    data: {
-      match_score: parsed.match_score || 0,
-      keywords: parsed.keywords || [],
-      missing_skills: parsed.missing_skills || [],
-      suggestions: parsed.suggestions || [],
-    },
+    data: normalizeJdMatchResult(parsed, jdText),
     meta: { model, usage, cost },
   };
 }
@@ -1098,17 +1102,14 @@ async function matchJd(resumeContent, jdText, options = {}) {
  */
 async function scoreResume(resumeContent, options = {}) {
   const prompt = await buildTaskPrompt(AI_TASK.SCORE, { resume_content: resumeContent }, options);
-  const { content, usage, model, cost } = await callDeepseek(prompt, modelCallOptions(AI_TASK.SCORE, options));
+  // 非流式评分同样锁定 JSON 响应，确保五个维度可被稳定读取。
+  const { content, usage, model, cost } = await callDeepseek(prompt, {
+    ...modelCallOptions(AI_TASK.SCORE, options),
+    responseFormat: { type: 'json_object' },
+  });
   const parsed = extractJson(content);
   return {
-    data: {
-      content_completeness: parsed.content_completeness || 0,
-      skill_match: parsed.skill_match || 0,
-      project_quality: parsed.project_quality || 0,
-      resume_structure: parsed.resume_structure || 0,
-      format_quality: parsed.format_quality || 0,
-      total: parsed.total || 0,
-    },
+    data: normalizeScoreResult(parsed),
     meta: { model, usage, cost },
   };
 }
@@ -1158,58 +1159,18 @@ async function callDeepseekVisionStream(imageBuffer, mimeType, textPrompt, optio
 function parseScorePayload(content) {
   const jsonMatch = String(content || '').match(/<SCORE_JSON>([\s\S]*?)<\/SCORE_JSON>/i);
   const parsed = jsonMatch ? extractJson(jsonMatch[1]) : extractJson(content);
-  return {
-    content_completeness: parsed.content_completeness || 0,
-    skill_match: parsed.skill_match || 0,
-    project_quality: parsed.project_quality || 0,
-    resume_structure: parsed.resume_structure || 0,
-    format_quality: parsed.format_quality || 0,
-    total: parsed.total || 0,
-  };
-}
-
-function createScoreVisibleChunkHandler(onChunk) {
-  let buffer = '';
-  let hidden = false;
-  return (chunk) => {
-    // Hide the internal <SCORE_JSON> block from users while still keeping it in full content for parsing.
-    buffer += chunk;
-    let visible = '';
-    while (buffer) {
-      if (hidden) {
-        const end = buffer.search(/<\/SCORE_JSON>/i);
-        if (end === -1) {
-          buffer = '';
-          break;
-        }
-        buffer = buffer.slice(end).replace(/^<\/SCORE_JSON>/i, '');
-        hidden = false;
-        continue;
-      }
-
-      const start = buffer.search(/<SCORE_JSON>/i);
-      if (start === -1) {
-        // Keep a short tail so a split "<SCORE_JSON>" tag is not leaked to the UI.
-        if (buffer.length <= 20) break;
-        visible += buffer.slice(0, -20);
-        buffer = buffer.slice(-20);
-        break;
-      }
-      visible += buffer.slice(0, start);
-      buffer = buffer.slice(start).replace(/^<SCORE_JSON>/i, '');
-      hidden = true;
-    }
-    if (visible && typeof onChunk === 'function') onChunk(visible);
-  };
+  return normalizeScoreResult(parsed);
 }
 
 async function scoreResumeStream(resumeContent, options = {}, onChunk) {
   const prompt = await buildTaskPrompt(AI_TASK.SCORE, { resume_content: resumeContent }, options, 'score_stream');
+  const visibleChunkHandler = createScoreVisibleChunkHandler(onChunk);
   const { content, usage, model, cost } = await callDeepseekStream(
     prompt,
     modelCallOptions(AI_TASK.SCORE, options),
-    createScoreVisibleChunkHandler(onChunk),
+    visibleChunkHandler,
   );
+  visibleChunkHandler.flush();
   return { data: parseScorePayload(content), meta: { model, usage, cost } };
 }
 
