@@ -64,7 +64,7 @@ async function createWithinLimit(userId, body, maxCount) {
       if (idempotentRows.length) {
         await client.query('COMMIT');
         transactionOpen = false;
-        return { data: idempotentRows[0], error: null };
+        return { data: idempotentRows[0], error: null, idempotent: true };
       }
     }
 
@@ -94,7 +94,7 @@ async function createWithinLimit(userId, body, maxCount) {
     );
     await client.query('COMMIT');
     transactionOpen = false;
-    return { data: rows[0], error: null };
+    return { data: rows[0], error: null, idempotent: false };
   } catch (error) {
     if (transactionOpen) await client.query('ROLLBACK');
     return { data: null, error };
@@ -114,6 +114,51 @@ async function updateResume(userId, resumeId, body) {
     .eq('id', resumeId)
     .eq('user_id', userId)
     .select()
+    .single();
+}
+
+async function createHistory(userId, resumeId, body, sourceType) {
+  const payload = {
+    resume_id: resumeId,
+    user_id: userId,
+    ...buildResumePayload(body),
+    // 历史类型只记录 AI 生成/优化来源，便于前端展示而不参与权限判断。
+    source_type: sourceType || 'ai_optimize',
+    create_time: new Date().toISOString(),
+  };
+  return dbAdmin.from('resume_history').insert(payload).select().single();
+}
+
+async function trimHistory(resumeId, keepCount) {
+  const { data, error } = await dbAdmin
+    .from('resume_history')
+    .select('id')
+    .eq('resume_id', resumeId)
+    .order('create_time', { ascending: false })
+    .order('id', { ascending: false });
+  if (error) return { data: null, error };
+  const deleteIds = (data || []).slice(Number(keepCount)).map((item) => item.id);
+  if (!deleteIds.length) return { data: [], error: null };
+  return dbAdmin.from('resume_history').delete().in('id', deleteIds);
+}
+
+async function listHistory(userId, resumeId) {
+  return dbAdmin
+    .from('resume_history')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('resume_id', resumeId)
+    .order('create_time', { ascending: false })
+    .order('id', { ascending: false });
+}
+
+async function findHistoryById(userId, resumeId, historyId) {
+  return dbAdmin
+    .from('resume_history')
+    .select('*')
+    .eq('id', historyId)
+    .eq('user_id', userId)
+    .eq('resume_id', resumeId)
     .single();
 }
 
@@ -211,4 +256,8 @@ module.exports = {
   countByUser,
   findOldestByUser,
   listAdmin,
+  createHistory,
+  trimHistory,
+  listHistory,
+  findHistoryById,
 };

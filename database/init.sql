@@ -154,6 +154,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_resume_user_client_request
   ON public.resume(user_id, client_request_id)
   WHERE client_request_id IS NOT NULL;
 
+CREATE TABLE IF NOT EXISTS public.resume_history (
+  id          BIGSERIAL PRIMARY KEY,
+  resume_id   BIGINT NOT NULL REFERENCES public.resume(id) ON DELETE CASCADE,
+  user_id     UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  source_type TEXT NOT NULL DEFAULT 'ai_optimize',
+  title       TEXT DEFAULT '未命名简历',
+  resume_json TEXT DEFAULT '{}',
+  template_id INT  DEFAULT 1,
+  score       INT  DEFAULT 0,
+  create_time TIMESTAMPTZ DEFAULT now()
+);
+-- 每份简历只保留最近 3 条 AI 生成/优化历史；裁剪由服务层在同一业务动作后执行。
+CREATE INDEX IF NOT EXISTS idx_resume_history_resume_time
+  ON public.resume_history(resume_id, create_time DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_resume_history_user_id ON public.resume_history(user_id);
+
 CREATE TABLE IF NOT EXISTS public.export_record (
   id          BIGSERIAL PRIMARY KEY,
   user_id     UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,

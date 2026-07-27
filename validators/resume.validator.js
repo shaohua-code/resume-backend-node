@@ -13,6 +13,7 @@ const create = [
   body('resume_json').notEmpty().withMessage('resume_json 不能为空'),
   // 客户端生成保存键，保证 AI 已完成但网络响应丢失时可安全重试。
   body('client_request_id').optional().isString().trim().isLength({ min: 8, max: 100 }).withMessage('client_request_id 长度必须为 8-100 个字符'),
+  body('history_type').optional().isString().trim().isLength({ max: 40 }).withMessage('history_type 长度不能超过 40 个字符'),
 ]
 
 /**
@@ -22,6 +23,7 @@ const update = [
   param('id').notEmpty().withMessage('简历 id 不能为空'),
   body('title').optional().isString().withMessage('title 必须是字符串'),
   body('resume_json').optional().notEmpty().withMessage('resume_json 不能为空'),
+  body('history_type').optional().isString().trim().isLength({ max: 40 }).withMessage('history_type 长度不能超过 40 个字符'),
 ]
 
 /**
@@ -31,6 +33,7 @@ const save = [
   body('title').optional().isString().withMessage('title 必须是字符串'),
   body('resume_json').notEmpty().withMessage('resume_json 不能为空'),
   body('client_request_id').optional().isString().trim().isLength({ min: 8, max: 100 }).withMessage('client_request_id 长度必须为 8-100 个字符'),
+  body('history_type').optional().isString().trim().isLength({ max: 40 }).withMessage('history_type 长度不能超过 40 个字符'),
 ]
 
 /**
@@ -63,11 +66,22 @@ const recordExport = [
   body('resume_id').optional().notEmpty().withMessage('resume_id 不能为空'),
 ]
 
+const history = [
+  param('id').notEmpty().withMessage('简历 id 不能为空'),
+]
+
+const applyHistory = [
+  param('id').notEmpty().withMessage('简历 id 不能为空'),
+  param('historyId').notEmpty().withMessage('历史版本 id 不能为空'),
+]
+
 module.exports = {
   create,
   update,
   save,
   detail,
+  history,
+  applyHistory,
   remove,
   batchRemove,
   recordExport,

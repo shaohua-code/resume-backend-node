@@ -70,6 +70,16 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | 关联 | `user_id` → `users.id`（CASCADE） |
 | 代码路径 | `repositories/resume.repository.js`、`services/resume/resume.service.js` |
 
+### resume_history — 简历 AI 历史表
+
+| 项 | 说明 |
+|---|---|
+| 主键 | `id` (BIGSERIAL) |
+| 核心字段 | `resume_id`、`user_id`、`source_type`、`title`、`resume_json`、`template_id`、`score`、`create_time` |
+| 约束 | 每份简历由服务层裁剪，只保留最近 3 条 AI 生成/优化历史；普通手动保存和历史恢复不写入 |
+| 关联 | `resume_id` → `resume.id`（CASCADE）；`user_id` → `users.id`（CASCADE） |
+| 代码路径 | `repositories/resume.repository.js`、`services/resume/resume.service.js` |
+
 ### export_record — 导出记录表
 
 | 项 | 说明 |
@@ -301,6 +311,7 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | `refresh_tokens` | 刷新令牌表 | JWT refresh token |
 | `user_profile` | 用户资料表 | 昵称、角色、封禁状态 |
 | `resume` | 简历表 | 简历 JSON 数据 |
+| `resume_history` | 简历 AI 历史表 | 每份简历最近 3 条 AI 生成/优化模板快照 |
 | `export_record` | 导出记录表 | PDF 导出审计 |
 | `membership_plan` | 会员套餐表 | 套餐配置（已弱化 VIP） |
 | `order_record` | 订单表 | 支付订单 |

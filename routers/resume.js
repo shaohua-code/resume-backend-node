@@ -6,6 +6,7 @@
  *
  * 数据表约定：
  * - resume         (id bigint pk, user_id uuid, title text, resume_json text, template_id int, score int, create_time timestamp, update_time timestamp)
+ * - resume_history (id bigint pk, resume_id bigint, user_id uuid, source_type text, resume_json text, template_id int, create_time timestamp)
  * - export_record  (id bigint pk, user_id uuid, resume_id bigint, create_time timestamp)
  *
  * 注意：user_id 为 uuid 类型，对应 users.id
@@ -55,6 +56,18 @@ router.get('/list', resumeController.list);
  * GET /api/resume/detail
  */
 router.get('/detail', resumeValidator.detail, validate, resumeController.detail);
+
+/**
+ * 获取某份简历最近 3 条 AI 生成/优化历史
+ * GET /api/resume/:id/history
+ */
+router.get('/:id/history', resumeValidator.history, validate, resumeController.history);
+
+/**
+ * 将历史版本应用到当前简历
+ * POST /api/resume/:id/history/:historyId/apply
+ */
+router.post('/:id/history/:historyId/apply', resumeValidator.applyHistory, validate, resumeController.applyHistory);
 
 /**
  * 删除简历接口

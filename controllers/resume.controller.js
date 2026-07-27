@@ -54,6 +54,24 @@ async function list(req, res) {
   }
 }
 
+async function history(req, res) {
+  try {
+    const result = await resumeService.listResumeHistory(req.user.id, req.params.id);
+    return success(res, result);
+  } catch (e) {
+    return error(res, e.statusCode || 500, e.message);
+  }
+}
+
+async function applyHistory(req, res) {
+  try {
+    const result = await resumeService.applyResumeHistory(req.user.id, req.params.id, req.params.historyId);
+    return success(res, result, '历史版本已应用');
+  } catch (e) {
+    return error(res, e.statusCode || 500, e.message, { code: e.code });
+  }
+}
+
 async function remove(req, res) {
   try {
     const resumeId = req.query.resume_id || req.body?.resume_id;
@@ -101,6 +119,8 @@ module.exports = {
   save,
   detail,
   list,
+  history,
+  applyHistory,
   remove,
   batchRemove,
   count,
