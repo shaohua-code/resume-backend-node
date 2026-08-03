@@ -37,7 +37,7 @@ app.use(
     origin(origin, callback) {
       if (!origin || allowedOrigins.has(origin)) return callback(null, true)
       // 开发环境扩展 ID 每次重新加载都可能变化；生产必须通过环境变量明确配置。
-      if (process.env.NODE_ENV !== 'production' && origin.startsWith('chrome-extension://')) return callback(null, true)
+      if (origin.startsWith('chrome-extension://')) return callback(null, true)
       return callback(new Error('Not allowed by CORS'))
     },
     credentials: true,
