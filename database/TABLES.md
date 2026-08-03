@@ -1,12 +1,12 @@
 # 数据库表中文对照
 
-项目共 **25 张表**，建表脚本见 [`init.sql`](init.sql)。
+项目共 **28 张表**，建表脚本见 [`init.sql`](init.sql)。
 
 验证表数量：
 
 ```sql
 SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
--- 预期：25
+-- 预期：28
 ```
 
 ---
@@ -332,3 +332,27 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | `admin_recharge_config` | 管理员充值二维码配置 | 付款码与联系二维码 |
 | `recharge_request` | 充值凭证申请表 | 用户提交凭证、管理员审核入账 |
 | `visit_log` | 访问日志表 | 网站访问统计 |
+| `extension_auth_code` | 扩展授权码表 | 仅保存一次性授权码哈希，原子消费后签发扩展会话 |
+| `extension_saved_job` | 浏览器收藏岗位表 | 用户隔离的岗位来源、JD、匹配结果与状态 |
+
+---
+
+## 浏览器求职 Agent
+
+### extension_auth_code - 扩展一次性授权码
+
+| 项目 | 说明 |
+|---|---|
+| 核心字段 | `user_id`、`code_hash`、`expires_at`、`consumed_at` |
+| 安全约束 | 仅保存授权码哈希；交换接口以 `DELETE ... RETURNING` 原子消费，扩展不持有网页 refresh token。 |
+| 代码路径 | `routers/extension.js` |
+
+### extension_saved_job - 我的收藏岗位
+
+| 项目 | 说明 |
+|---|---|
+| 核心字段 | `user_id`、`source_key`、`source_url`、`source_platform`、`source_original`、`title`、`company`、`location`、`address`、`salary`、`skills`、`jd_text`、`resume_id`、`match_result`、`status` |
+| 约束 | `(user_id, source_key)` 唯一；保存时优先按 `source_url` 更新已有记录，字段补全不会生成重复收藏。 |
+| 状态 | `saved`、`ready`、`applied`、`archived`。Agent 只能保存或准备，不会自动投递。 |
+| 识别数据 | `jd_text` 只保存当前岗位的职责与要求；平台来源、转载来源、完整地址和显式技能分别存储，避免再次从混合文本中猜字段。 |
+| 代码路径 | `routers/extension.js`；网页端 `src/api/extensionJobs.js` 与浏览器扩展共用接口。 |

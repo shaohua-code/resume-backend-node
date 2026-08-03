@@ -6,6 +6,7 @@
 
 const express = require('express')
 const cors = require('cors')
+const fs = require('fs')
 const { settings } = require('./config')
 const routes = require('./routers')
 const { errorHandler } = require('./middlewares/errorHandler')
@@ -13,9 +14,15 @@ const { ensureUploadDirs, UPLOAD_ROOT } = require('./lib/uploadPaths')
 const { globalLimiter } = require('./middlewares/rateLimiter')  // 引入全局速率限制
 
 const app = express()
+const allowedOrigins = new Set([
+  ...settings.CORS_ORIGINS,
+  ...settings.EXTENSION_CORS_ORIGINS,
+])
 
 // 启动时创建上传目录
 ensureUploadDirs()
+// 发布包允许部署后手工替换；启动时只确保目录存在，不生成虚假 ZIP。
+fs.mkdirSync(settings.EXTENSION_RELEASE_DIR, { recursive: true })
 
 // 部署在反向代理后时，正确解析客户端 IP
 app.set('trust proxy', 1)
@@ -27,7 +34,12 @@ app.use(express.urlencoded({ extended: true }))
 // 跨域配置：读取环境变量中的 CORS_ORIGINS
 app.use(
   cors({
-    origin: settings.CORS_ORIGINS,
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.has(origin)) return callback(null, true)
+      // 开发环境扩展 ID 每次重新加载都可能变化；生产必须通过环境变量明确配置。
+      if (process.env.NODE_ENV !== 'production' && origin.startsWith('chrome-extension://')) return callback(null, true)
+      return callback(new Error('Not allowed by CORS'))
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],

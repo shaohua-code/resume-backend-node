@@ -50,6 +50,11 @@ const settings = {
     .map((s) => s.trim())
     .filter(Boolean),
 
+  EXTENSION_CORS_ORIGINS: (process.env.EXTENSION_CORS_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+
   APP_FRONTEND_URL: process.env.APP_FRONTEND_URL || process.env.FRONTEND_URL || 'http://localhost:5173',
 
   // 邮件内图片等资源的公网绝对 URL 前缀（默认可读 APP_PUBLIC_URL）
@@ -57,6 +62,9 @@ const settings = {
 
   // 上传文件根目录（生产环境建议 /var/www/resume-uploads，独立于 Git 仓库）
   UPLOAD_DIR: process.env.UPLOAD_DIR || path.join(__dirname, 'data', 'uploads'),
+
+  // 浏览器扩展发布包目录；官网通过后端稳定下载接口读取，不在前端重复存放 ZIP。
+  EXTENSION_RELEASE_DIR: process.env.EXTENSION_RELEASE_DIR || path.join(__dirname, 'data', 'extension-releases'),
 }
 
 if (!settings.DATABASE_URL) {

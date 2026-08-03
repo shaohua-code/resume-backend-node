@@ -19,12 +19,37 @@ const {
 const { ensureUserProfile } = require('../services/user_profile_service')
 const inviteService = require('../services/admin/admin.invite.service')
 const { authRequired } = require('../middlewares/auth')
+const crypto = require('crypto')
+const db = require('../lib/db')
 const { authLimiter, registerLimiter } = require('../middlewares/rateLimiter')
 
 const router = express.Router()
 
 // 认证入口统一限制单个 IP 的请求频率，随机注册再叠加小时级限制。
 router.use(authLimiter)
+
+/**
+ * 扩展授权页在已有网页登录态下自动签发短时、一次性的授权码；没有网页会话时由路由守卫先进入系统登录。
+ */
+router.post('/extension/code', authRequired, async (req, res) => {
+  const redirectUri = String(req.body?.redirect_uri || '').trim()
+  if (!/^https:\/\/[a-z0-9_-]+\.chromiumapp\.org\//i.test(redirectUri)) {
+    return res.status(400).json({ detail: '扩展回调地址无效' })
+  }
+  const code = crypto.randomBytes(32).toString('base64url')
+  const codeHash = crypto.createHash('sha256').update(code).digest('hex')
+  try {
+    await db.query(
+      `INSERT INTO public.extension_auth_code (user_id, code_hash, redirect_uri, expires_at)
+       VALUES ($1, $2, $3, now() + interval '2 minutes')`,
+      [req.user.id, codeHash, redirectUri],
+    )
+    const separator = redirectUri.includes('?') ? '&' : '?'
+    return res.json({ redirect_url: `${redirectUri}${separator}code=${encodeURIComponent(code)}` })
+  } catch (error) {
+    return sendBusinessError(res, error, 500, '扩展授权暂时不可用')
+  }
+})
 
 /** 返回第一条参数校验错误，避免各路由重复拼装响应。 */
 function sendValidationError(req, res) {

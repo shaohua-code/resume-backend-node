@@ -64,6 +64,47 @@ CREATE TABLE IF NOT EXISTS public.refresh_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON public.refresh_tokens(user_id);
 
+-- 浏览器扩展授权码只可消费一次；网页登录令牌不会复制到扩展中。
+CREATE TABLE IF NOT EXISTS public.extension_auth_code (
+  id BIGSERIAL PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  code_hash TEXT UNIQUE NOT NULL,
+  redirect_uri TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  consumed_at TIMESTAMPTZ,
+  create_time TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_extension_auth_code_user ON public.extension_auth_code(user_id, expires_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.extension_saved_job (
+  id BIGSERIAL PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  source_key TEXT NOT NULL,
+  source_url TEXT NOT NULL,
+  title TEXT NOT NULL,
+  company TEXT DEFAULT '',
+  location TEXT DEFAULT '',
+  address TEXT DEFAULT '',
+  salary TEXT DEFAULT '',
+  skills JSONB NOT NULL DEFAULT '[]'::jsonb,
+  source_platform TEXT DEFAULT '',
+  source_original TEXT DEFAULT '',
+  jd_text TEXT NOT NULL,
+  resume_id BIGINT REFERENCES public.resume(id) ON DELETE SET NULL,
+  match_result JSONB NOT NULL DEFAULT '{}'::jsonb,
+  status TEXT NOT NULL DEFAULT 'saved' CHECK (status IN ('saved', 'ready', 'applied', 'archived')),
+  create_time TIMESTAMPTZ DEFAULT now(),
+  update_time TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(user_id, source_key)
+);
+CREATE INDEX IF NOT EXISTS idx_extension_saved_job_user ON public.extension_saved_job(user_id, update_time DESC);
+
+-- 兼容已创建过 V2 表的本地数据库；初始化脚本可重复执行，不另建迁移文件。
+ALTER TABLE public.extension_saved_job ADD COLUMN IF NOT EXISTS address TEXT DEFAULT '';
+ALTER TABLE public.extension_saved_job ADD COLUMN IF NOT EXISTS skills JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE public.extension_saved_job ADD COLUMN IF NOT EXISTS source_platform TEXT DEFAULT '';
+ALTER TABLE public.extension_saved_job ADD COLUMN IF NOT EXISTS source_original TEXT DEFAULT '';
+
 -- ========== 2. 用户资料 ==========
 
 CREATE TABLE IF NOT EXISTS public.user_profile (

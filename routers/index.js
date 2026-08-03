@@ -15,6 +15,7 @@ const walletRouter = require('./wallet')
 const visitRouter = require('./visit')
 const announcementRouter = require('./announcement')
 const userRouter = require('./user')
+const extensionRouter = require('./extension')
 
 const router = express.Router()
 
@@ -29,5 +30,6 @@ router.use('/wallet', walletRouter)
 router.use('/visits', visitRouter)
 router.use('/announcements', announcementRouter)
 router.use('/user', userRouter)
+router.use('/extension', extensionRouter)
 
 module.exports = router
