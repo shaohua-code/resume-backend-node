@@ -50,7 +50,17 @@ router.post('/auth/exchange', async (req, res) => {
     const { rows: users } = await db.query('SELECT id, account, email, email_verified, session_version FROM public.users WHERE id = $1', [codes[0].user_id])
     if (!users.length) return res.status(401).json({ detail: '账号不存在' })
     return success(res, { access_token: signAccessToken(users[0]) })
-  } catch (error) { return res.status(500).json({ detail: '扩展授权暂时不可用' }) }
+  } catch (error) {
+    console.error('[extension auth exchange]', {
+      code: error.code,
+      message: error.message,
+      detail: error.detail,
+    })
+    return res.status(500).json({
+      detail: '扩展授权暂时不可用',
+      code: 'EXTENSION_AUTH_EXCHANGE_FAILED',
+    })
+  }
 })
 
 router.get('/bootstrap', authRequired, async (req, res) => {
