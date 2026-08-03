@@ -71,7 +71,7 @@ uploads/
 data/uploads/
 
 # ========== 浏览器扩展发布包（由部署环境手工放置）==========
-data/extension-releases/*.zip
+!data/extension-releases/*.zip
 !data/extension-releases/.gitkeep
 !data/extension-releases/README.md
 
