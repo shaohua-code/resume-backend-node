@@ -1,6 +1,6 @@
 /**
- * PDF 控制器
- * 处理 PDF 上传、事实识别、AI 优化（同步/流式）以及文件管理
+ * PDF / Word 简历源文件控制器
+ * 处理上传、事实识别、AI 优化（同步/流式）以及文件管理
  */
 
 const aiService = require('../services/ai/ai.service');
@@ -48,7 +48,7 @@ async function uploadOptimize(req, res) {
       return error(res, 400, uploadErr.message || '文件上传失败');
     }
     if (!req.file) {
-      return error(res, 400, '请上传 PDF 文件（字段名：file）');
+      return error(res, 400, '请上传 PDF 或 Word（.docx）文件（字段名：file）');
     }
     const filePath = req.file.path;
     const targetPosition = req.body?.target_position || '';
@@ -86,7 +86,7 @@ async function uploadOptimizeStream(req, res) {
       return res.end();
     }
     if (!req.file) {
-      sendEvent({ error: '请上传 PDF 文件（字段名：file）' });
+      sendEvent({ error: '请上传 PDF 或 Word（.docx）文件（字段名：file）' });
       return res.end();
     }
     const filePath = req.file.path;
@@ -94,7 +94,7 @@ async function uploadOptimizeStream(req, res) {
     try {
       await ensureAiQuota(req, taskType);
       const pdfText = await pdfService.parsePdfFile(filePath);
-      sendEvent({ status: 'PDF 解析完成，AI 正在优化...' });
+      sendEvent({ status: '文件解析完成，AI 正在优化...' });
       const { data, meta } = await aiService.optimizeFromPdfTextStream(pdfText, targetPosition, getAiOptions(req), (chunk) => {
         sendEvent({ chunk });
       });
@@ -131,7 +131,7 @@ async function uploadOptimizeStream(req, res) {
 }
 
 /**
- * 上传 PDF 并流式识别结构化表单字段。
+ * 上传 PDF/Word 并流式识别结构化表单字段。
  * 与历史 uploadOptimize 接口分离，识别阶段不做润色、补写或岗位优化。
  */
 async function uploadRecognizeStream(req, res) {
@@ -143,7 +143,7 @@ async function uploadRecognizeStream(req, res) {
       return res.end();
     }
     if (!req.file) {
-      sendEvent({ error: '请上传 PDF 文件（字段名：file）' });
+      sendEvent({ error: '请上传 PDF 或 Word（.docx）文件（字段名：file）' });
       return res.end();
     }
 
@@ -151,9 +151,9 @@ async function uploadRecognizeStream(req, res) {
     const model = getRequestedModel(req);
     try {
       await ensureAiQuota(req, taskType);
-      sendEvent({ status: '正在解析 PDF 文本...' });
+      sendEvent({ status: '正在解析简历文件文本...' });
       const pdfText = await pdfService.parsePdfFile(req.file.path);
-      sendEvent({ status: 'PDF 解析完成，正在识别简历字段...' });
+      sendEvent({ status: '文件解析完成，正在识别简历字段...' });
       const { data, meta } = await aiService.extractResumeFromTextStream(
         pdfText,
         getAiOptions(req),
@@ -161,7 +161,7 @@ async function uploadRecognizeStream(req, res) {
       );
       if (!data?.resume || Object.keys(data.resume).length === 0) {
         await recordAiCall(req, taskType, model, false, '未能识别出有效简历信息');
-        sendEvent({ error: '未能识别出有效简历信息，请检查 PDF 内容后重试' });
+        sendEvent({ error: '未能识别出有效简历信息，请检查文件内容后重试' });
         return res.end();
       }
 
@@ -181,7 +181,7 @@ async function uploadRecognizeStream(req, res) {
 }
 
 /**
- * 使用已上传 PDF 流式纯识别（SSE），无需重新上传。
+ * 使用已上传简历源文件流式纯识别（SSE），无需重新上传。
  * 与 uploadRecognizeStream 共用 resume_extract，不做润色或优化。
  */
 async function existingRecognizeStream(req, res) {
@@ -189,16 +189,16 @@ async function existingRecognizeStream(req, res) {
   const model = getRequestedModel(req);
   const userId = req.user.id;
   const sendEvent = setupSSE(res);
-  const filePath = pdfService.getUserPdfPath(userId);
-  if (!pdfService.getFileMeta(userId)) {
-    sendEvent({ error: '暂无已上传的简历，请先上传 PDF' });
+  const found = pdfService.findUserResumeFile(userId);
+  if (!found) {
+    sendEvent({ error: '暂无已上传的简历，请先上传 PDF 或 Word（.docx）' });
     return res.end();
   }
   try {
     await ensureAiQuota(req, taskType);
-    sendEvent({ status: '正在读取已上传 PDF 文本...' });
-    const pdfText = await pdfService.parsePdfFile(filePath);
-    sendEvent({ status: 'PDF 解析完成，正在识别简历字段...' });
+    sendEvent({ status: '正在读取已上传简历文件...' });
+    const pdfText = await pdfService.parsePdfFile(found.filePath);
+    sendEvent({ status: '文件解析完成，正在识别简历字段...' });
     const { data, meta } = await aiService.extractResumeFromTextStream(
       pdfText,
       getAiOptions(req),
@@ -206,7 +206,7 @@ async function existingRecognizeStream(req, res) {
     );
     if (!data?.resume || Object.keys(data.resume).length === 0) {
       await recordAiCall(req, taskType, model, false, '未能识别出有效简历信息');
-      sendEvent({ error: '未能识别出有效简历信息，请检查 PDF 内容后重试' });
+      sendEvent({ error: '未能识别出有效简历信息，请检查文件内容后重试' });
       return res.end();
     }
     await recordAiCall(req, taskType, model, true, '', meta);
@@ -234,7 +234,7 @@ async function uploadOptimizeByJdStream(req, res) {
       return res.end();
     }
     if (!req.file) {
-      sendEvent({ error: '请上传 PDF 文件（字段名：file）' });
+      sendEvent({ error: '请上传 PDF 或 Word（.docx）文件（字段名：file）' });
       return res.end();
     }
     const jdText = String(req.body?.jd_text || '').trim();
@@ -245,7 +245,7 @@ async function uploadOptimizeByJdStream(req, res) {
     const filePath = req.file.path;
     try {
       await ensureAiQuota(req, taskType);
-      sendEvent({ status: 'PDF 解析完成，AI 正在根据岗位 岗位优化...' });
+      sendEvent({ status: '文件解析完成，AI 正在根据岗位优化...' });
       const { data, meta } = await parseAndOptimizeByJd(filePath, jdText, getAiOptions(req), (chunk) => {
         sendEvent({ chunk });
       });
@@ -285,14 +285,14 @@ async function existingOptimize(req, res) {
   const taskType = 'pdf_optimize';
   const model = getRequestedModel(req);
   const userId = req.user.id;
-  const filePath = pdfService.getUserPdfPath(userId);
-  if (!pdfService.getFileMeta(userId)) {
-    return error(res, 400, '暂无已上传的简历，请先上传 PDF');
+  const found = pdfService.findUserResumeFile(userId);
+  if (!found) {
+    return error(res, 400, '暂无已上传的简历，请先上传 PDF 或 Word（.docx）');
   }
   const targetPosition = req.body?.target_position || '';
   try {
     await ensureAiQuota(req, taskType);
-    const { data, meta } = await parseAndOptimize(filePath, targetPosition, getAiOptions(req));
+    const { data, meta } = await parseAndOptimize(found.filePath, targetPosition, getAiOptions(req));
     if (!data || !data.resume || Object.keys(data.resume).length === 0) {
       await recordAiCall(req, taskType, model, false, 'AI优化失败，请重试');
       return error(res, 500, 'AI优化失败，请重试');
@@ -302,7 +302,7 @@ async function existingOptimize(req, res) {
     return success(res, {
       resume: data.resume,
       optimization_notes: data.optimization_notes || [],
-      file_name: `${userId}.pdf`,
+      file_name: stat?.filename || `${userId}${found.ext}`,
       file_size: stat.size,
     }, '简历优化完成');
   } catch (e) {
@@ -319,15 +319,15 @@ async function existingOptimizeStream(req, res) {
   const model = getRequestedModel(req);
   const userId = req.user.id;
   const sendEvent = setupSSE(res);
-  const filePath = pdfService.getUserPdfPath(userId);
-  if (!pdfService.getFileMeta(userId)) {
-    sendEvent({ error: '暂无已上传的简历，请先上传 PDF' });
+  const found = pdfService.findUserResumeFile(userId);
+  if (!found) {
+    sendEvent({ error: '暂无已上传的简历，请先上传 PDF 或 Word（.docx）' });
     return res.end();
   }
   const targetPosition = req.body?.target_position || '';
   try {
     await ensureAiQuota(req, taskType);
-    const pdfText = await pdfService.parsePdfFile(filePath);
+    const pdfText = await pdfService.parsePdfFile(found.filePath);
     sendEvent({ status: '读取已上传简历，AI 正在优化...' });
     const { data, meta } = await aiService.optimizeFromPdfTextStream(pdfText, targetPosition, getAiOptions(req), (chunk) => {
       sendEvent({ chunk });
@@ -344,7 +344,7 @@ async function existingOptimizeStream(req, res) {
       data: {
         resume: data.resume,
         optimization_notes: data.optimization_notes || [],
-        file_name: `${userId}.pdf`,
+        file_name: stat?.filename || `${userId}${found.ext}`,
         file_size: stat.size,
       },
     });
@@ -364,15 +364,15 @@ async function existingOptimizeStream(req, res) {
   }
 }
 
-/** 使用已上传 PDF + JD 流式优化（SSE） */
+/** 使用已上传简历源文件 + JD 流式优化（SSE） */
 async function existingOptimizeByJdStream(req, res) {
   const taskType = 'pdf_jd_optimize';
   const model = getRequestedModel(req);
   const userId = req.user.id;
   const sendEvent = setupSSE(res);
-  const filePath = pdfService.getUserPdfPath(userId);
-  if (!pdfService.getFileMeta(userId)) {
-    sendEvent({ error: '暂无已上传的简历，请先上传 PDF' });
+  const found = pdfService.findUserResumeFile(userId);
+  if (!found) {
+    sendEvent({ error: '暂无已上传的简历，请先上传 PDF 或 Word（.docx）' });
     return res.end();
   }
   const jdText = String(req.body?.jd_text || '').trim();
@@ -382,8 +382,8 @@ async function existingOptimizeByJdStream(req, res) {
   }
   try {
     await ensureAiQuota(req, taskType);
-    sendEvent({ status: '读取已上传简历，AI 正在根据岗位 岗位优化...' });
-    const { data, meta } = await parseAndOptimizeByJd(filePath, jdText, getAiOptions(req), (chunk) => {
+    sendEvent({ status: '读取已上传简历，AI 正在根据岗位优化...' });
+    const { data, meta } = await parseAndOptimizeByJd(found.filePath, jdText, getAiOptions(req), (chunk) => {
       sendEvent({ chunk });
     });
     if (!data || !data.resume || Object.keys(data.resume).length === 0) {
@@ -398,7 +398,7 @@ async function existingOptimizeByJdStream(req, res) {
       data: {
         resume: data.resume,
         optimization_notes: data.optimization_notes || [],
-        file_name: `${userId}.pdf`,
+        file_name: stat?.filename || `${userId}${found.ext}`,
         file_size: stat.size,
       },
     });
@@ -424,18 +424,19 @@ async function uploadedFileMeta(req, res) {
 }
 
 /**
- * 流式返回当前用户私有 PDF，供前端 iframe 预览；不暴露公开 URL。
+ * 返回当前用户私有简历源文件；PDF 可 inline 预览，Word 以附件下载。
  */
 async function uploadedFileContent(req, res) {
   const fs = require('fs');
-  const filePath = pdfService.getUserPdfPath(req.user.id);
-  if (!fs.existsSync(filePath)) {
-    return error(res, 404, '尚未上传 PDF');
+  const found = pdfService.findUserResumeFile(req.user.id);
+  if (!found) {
+    return error(res, 404, '尚未上传简历文件');
   }
-  res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', 'inline; filename="resume.pdf"');
+  const headers = pdfService.getResumeContentHeaders(found.filePath);
+  res.setHeader('Content-Type', headers.contentType);
+  res.setHeader('Content-Disposition', headers.disposition);
   res.setHeader('Cache-Control', 'private, no-store');
-  return fs.createReadStream(filePath).pipe(res);
+  return fs.createReadStream(found.filePath).pipe(res);
 }
 
 async function deleteUploadedFile(req, res) {
