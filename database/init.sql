@@ -349,6 +349,24 @@ CREATE TABLE IF NOT EXISTS public.user_feedback (
 CREATE INDEX IF NOT EXISTS idx_user_feedback_user_id ON public.user_feedback(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_feedback_create_time ON public.user_feedback(create_time DESC);
 
+-- 管理员收件箱：同一事件按接收人各写一条，已读互不影响
+CREATE TABLE IF NOT EXISTS public.admin_notification (
+  id                  BIGSERIAL PRIMARY KEY,
+  recipient_admin_id  UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  source_type         TEXT NOT NULL DEFAULT 'USER_FEEDBACK',
+  source_id           BIGINT,
+  actor_user_id       UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  title               TEXT NOT NULL DEFAULT '',
+  summary             TEXT NOT NULL DEFAULT '',
+  read_at             TIMESTAMPTZ,
+  create_time         TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (recipient_admin_id, source_type, source_id)
+);
+CREATE INDEX IF NOT EXISTS idx_admin_notification_recipient_time
+  ON public.admin_notification(recipient_admin_id, create_time DESC);
+CREATE INDEX IF NOT EXISTS idx_admin_notification_unread
+  ON public.admin_notification(recipient_admin_id, read_at);
+
 -- ========== 8. 钱包 ==========
 
 CREATE TABLE IF NOT EXISTS public.user_wallet (

@@ -15,6 +15,7 @@ const walletService = require('../services/wallet/wallet.service');
 const ledgerService = require('../services/admin/admin.ledger.service');
 const inviteService = require('../services/admin/admin.invite.service');
 const visitService = require('../services/admin/admin.visit.service');
+const notificationService = require('../services/admin/admin.notification.service');
 const rechargeService = require('../services/admin/admin.recharge.service');
 const rechargeRequestService = require('../services/admin/admin.rechargeRequest.service');
 const announcementService = require('../services/announcement/announcement.service');
@@ -406,6 +407,55 @@ async function getFeedback(req, res) {
 }
 
 /**
+ * 当前管理员收件箱列表
+ */
+async function listNotifications(req, res) {
+  try {
+    const { page, size, from, to } = parsePagination(req);
+    const result = await notificationService.listNotifications(req, from, to);
+    return res.json({
+      success: true,
+      items: result.items,
+      total: result.total,
+      page,
+      size,
+    });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+/**
+ * 当前管理员未读消息数，供铃铛角标使用
+ */
+async function getNotificationUnreadCount(req, res) {
+  try {
+    const data = await notificationService.getUnreadCount(req);
+    return res.json({ success: true, data });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+async function markNotificationRead(req, res) {
+  try {
+    const data = await notificationService.markNotificationRead(req);
+    return res.json({ success: true, data });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+async function markAllNotificationsRead(req, res) {
+  try {
+    const data = await notificationService.markAllNotificationsRead(req);
+    return res.json({ success: true, data });
+  } catch (err) {
+    return handleError(res, err);
+  }
+}
+
+/**
  * 调整用户额度
  */
 async function adjustUserBalance(req, res) {
@@ -659,6 +709,10 @@ module.exports = {
   upsertTaskPrompt,
   listFeedbacks,
   getFeedback,
+  listNotifications,
+  getNotificationUnreadCount,
+  markNotificationRead,
+  markAllNotificationsRead,
   // 新增导出
   listLedgers,
   claimUser,

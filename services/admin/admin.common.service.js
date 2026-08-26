@@ -82,6 +82,36 @@ async function getOwnedUserIds(user) {
 }
 
 /**
+ * 查找普通用户的归属管理员
+ * @param {string} userId - 用户 ID
+ * @returns {Promise<string|null>}
+ */
+async function findOwningAdminId(userId) {
+  if (!userId) return null;
+  const { data } = await dbAdmin
+    .from('admin_user_relation')
+    .select('admin_id')
+    .eq('user_id', userId)
+    .maybeSingle();
+  return data?.admin_id || null;
+}
+
+/**
+ * 列出全部超级管理员 user_id，用于把全站消息复制给每位超管
+ * @returns {Promise<string[]>}
+ */
+async function listSuperAdminIds() {
+  const { data, error } = await dbAdmin
+    .from('user_profile')
+    .select('user_id')
+    .eq('role', ROLES.SUPER_ADMIN);
+  if (error) {
+    throw Object.assign(new Error(`查询超级管理员失败：${error.message}`), { statusCode: 500 });
+  }
+  return (data || []).map((row) => row.user_id).filter(Boolean);
+}
+
+/**
  * 校验管理员是否有权访问目标用户
  * 超级管理员可访问所有用户；普通管理员只能访问归属用户
  * @param {Object} user - req.user 对象
@@ -107,4 +137,6 @@ module.exports = {
   logAdminAction,
   getOwnedUserIds,
   canAccessUser,
+  findOwningAdminId,
+  listSuperAdminIds,
 };

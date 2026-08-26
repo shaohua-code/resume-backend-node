@@ -1,12 +1,12 @@
 # 数据库表中文对照
 
-项目共 **28 张表**，建表脚本见 [`init.sql`](init.sql)。
+项目共 **29 张表**，建表脚本见 [`init.sql`](init.sql)。
 
 验证表数量：
 
 ```sql
 SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
--- 预期：28
+-- 预期：29
 ```
 
 ---
@@ -216,6 +216,17 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | 关联 | `user_id` → `users.id`（SET NULL） |
 | 代码路径 | `repositories/feedback.repository.js`、`routers/feedback.js` |
 
+### admin_notification — 管理员收件箱
+
+| 项 | 说明 |
+|---|---|
+| 主键 | `id` (BIGSERIAL) |
+| 核心字段 | `recipient_admin_id`、`source_type`（本轮 `USER_FEEDBACK`）、`source_id`、`actor_user_id`、`title`、`summary`、`read_at`（空为未读） |
+| 约束 | `(recipient_admin_id, source_type, source_id)` 唯一，避免同一接收人重复通知 |
+| 关联 | `recipient_admin_id` / `actor_user_id` → `users.id` |
+| 隔离 | 查询只返回当前登录管理员自己的消息；超管通过写入副本查看全部反馈事件 |
+| 代码路径 | `repositories/notification.repository.js`、`services/admin/admin.notification.service.js` |
+
 ---
 
 ## 8. 钱包
@@ -325,6 +336,7 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | `announcement` | 公告表 | 版本公告（时间窗 + Markdown） |
 | `admin_action_log` | 管理员操作日志 | 审计 |
 | `user_feedback` | 用户反馈表 | 反馈内容 |
+| `admin_notification` | 管理员收件箱 | 按接收人隔离的反馈消息 |
 | `user_wallet` | 用户钱包表 | 余额与累计消费 |
 | `balance_ledger` | 余额流水表 | 充值/消费/分配记录 |
 | `admin_user_relation` | 管理员用户归属表 | 用户归属哪个管理员 |

@@ -7,6 +7,8 @@ const geoip = require('geoip-lite')
 const visitRepo = require('../../repositories/visit.repository')
 const userRepo = require('../../repositories/user.repository')
 const { getUserByToken } = require('../auth/auth.service')
+const { formatGeo } = require('./visit.geo')
+const { normalizeVisitSource } = require('./visit.source')
 
 function getClientIp(req) {
   const forwarded = req.headers['x-forwarded-for']
@@ -14,14 +16,15 @@ function getClientIp(req) {
   return req.ip || req.socket?.remoteAddress || ''
 }
 
+/** 离线解析 IP 地理，并转成中文省/市 */
 function resolveGeo(ip) {
   const cleanIp = String(ip || '').replace(/^::ffff:/, '')
   if (!cleanIp || cleanIp === '127.0.0.1' || cleanIp === '::1') {
-    return { province: '', city: '' }
+    return formatGeo('', '')
   }
   const geo = geoip.lookup(cleanIp)
-  if (!geo) return { province: '', city: '' }
-  return { province: geo.region || '', city: geo.city || '' }
+  if (!geo) return formatGeo('', '')
+  return formatGeo(geo.region || geo.country || '', geo.city || '')
 }
 
 function parseUserAgent(userAgent) {
@@ -35,21 +38,6 @@ function parseUserAgent(userAgent) {
     device_type: device.type || 'desktop',
     device_brand: device.vendor || '',
   }
-}
-
-function normalizeVisitSource(raw) {
-  const source = String(raw || '').trim()
-  if (!source) return 'direct'
-  if (source.startsWith('utm:')) return source.slice(0, 200)
-  try {
-    if (source.startsWith('http')) {
-      const host = new URL(source).hostname
-      return host ? `referrer:${host}`.slice(0, 200) : 'direct'
-    }
-  } catch {
-    // ignore
-  }
-  return source.slice(0, 200)
 }
 
 async function resolveEmailFromRequest(req) {
@@ -113,7 +101,15 @@ async function listVisitsForAdmin(req, from, to) {
   }
   return {
     total: count || 0,
-    items: (data || []).map((row) => ({ ...row, visit_time: String(row.visit_time) })),
+    items: (data || []).map((row) => {
+      const geo = formatGeo(row.province, row.city)
+      return {
+        ...row,
+        province: geo.province,
+        city: geo.city,
+        visit_time: String(row.visit_time),
+      }
+    }),
   }
 }
 

@@ -21,14 +21,26 @@ async function countFeedbacks() {
  * @param {Object} params - 查询参数
  * @param {number} params.from - 起始索引
  * @param {number} params.to - 结束索引
+ * @param {string[]|null} [params.userIds] - 归属用户；null 表示超管不过滤
  * @returns {Promise<Object>} PostgreSQL 查询结果 { data, error, count }
  */
-async function listFeedbacks({ from, to }) {
-  return dbAdmin
+async function listFeedbacks({ from, to, userIds }) {
+  let query = dbAdmin
     .from('user_feedback')
     .select('*', { count: 'exact' })
     .order('create_time', { ascending: false })
     .range(from, to);
+
+  // 普通管理员：仅查询归属用户反馈；超管传 null 不过滤
+  if (userIds !== undefined && userIds !== null) {
+    if (!userIds.length) {
+      query = query.eq('user_id', '00000000-0000-0000-0000-000000000000');
+    } else {
+      query = query.in('user_id', userIds);
+    }
+  }
+
+  return query;
 }
 
 /**

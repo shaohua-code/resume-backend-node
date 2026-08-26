@@ -52,6 +52,18 @@ router.post('/', async (req, res) => {
       return res.status(500).json({ detail: `提交失败：${error.message}` });
     }
 
+    // 反馈落库后写入管理员收件箱，失败不阻断用户提交
+    try {
+      const notificationService = require('../services/admin/admin.notification.service');
+      await notificationService.createFeedbackNotifications({
+        feedbackId: data.id,
+        userId: req.user.id,
+        summary: stripHtmlText(contentHtml),
+      });
+    } catch {
+      // 忽略收件箱写入失败
+    }
+
     return res.json({ success: true, data, message: '反馈提交成功' });
   } catch (e) {
     return res.status(500).json({ detail: e.message || '提交失败' });

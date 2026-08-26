@@ -78,9 +78,15 @@ crudConfigs.forEach(({ path, table, permission }) => {
   router.delete(`${path}/:id`, requirePermission(permission), adminController.deleteCrudItem(table))
 })
 
-// 用户反馈（仅 SUPER_ADMIN）
+// 用户反馈（ADMIN 仅归属用户，SUPER_ADMIN 看全部）
 router.get('/feedbacks', requirePermission(PERMISSIONS.ADMIN_VIEW_FEEDBACK), adminController.listFeedbacks)
 router.get('/feedbacks/:id', requirePermission(PERMISSIONS.ADMIN_VIEW_FEEDBACK), adminController.getFeedback)
+
+// 管理端收件箱：列表与未读数必须写在 :id 路由之前
+router.get('/notifications/unread-count', requirePermission(PERMISSIONS.ADMIN_VIEW_NOTIFICATIONS), adminController.getNotificationUnreadCount)
+router.get('/notifications', requirePermission(PERMISSIONS.ADMIN_VIEW_NOTIFICATIONS), adminController.listNotifications)
+router.patch('/notifications/:id/read', requirePermission(PERMISSIONS.ADMIN_VIEW_NOTIFICATIONS), adminController.markNotificationRead)
+router.post('/notifications/read-all', requirePermission(PERMISSIONS.ADMIN_VIEW_NOTIFICATIONS), adminController.markAllNotificationsRead)
 
 // 访客记录（仅 SUPER_ADMIN）
 router.get('/visits', requirePermission(PERMISSIONS.ADMIN_VIEW_VISITS), adminController.listVisits)
