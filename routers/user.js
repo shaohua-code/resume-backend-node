@@ -14,6 +14,11 @@ router.get('/profile', userController.getProfile)
 router.patch('/profile', userController.updateProfile)
 router.post('/password', userController.changePassword)
 
+router.get('/career-goals', userController.listCareerGoals)
+router.post('/career-goals', userController.createCareerGoal)
+router.patch('/career-goals/:goalId', userController.updateCareerGoal)
+router.delete('/career-goals/:goalId', userController.deleteCareerGoal)
+
 router.get('/task-models', userController.listTaskModels)
 router.put('/task-models/:taskType', userController.saveTaskModel)
 router.delete('/task-models/:taskType', userController.clearTaskModel)

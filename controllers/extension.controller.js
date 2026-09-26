@@ -54,7 +54,35 @@ async function removeSavedJob(req, res) {
   }
 }
 
+// 求职进度接口统一复用服务校验，并保持本模块既有中文响应格式。
+async function updateJobProgress(req, res) {
+  const jobId = parseJobId(req)
+  if (!jobId) return error(res, 400, '岗位编号无效')
+  try {
+    const job = await extensionJobService.updateJobProgress(req.user.id, jobId, req.body)
+    return success(res, { job }, '求职进度已保存')
+  } catch (err) {
+    const statusCode = err.statusCode || 500
+    return error(res, statusCode, sanitizePublicError(statusCode, err.message))
+  }
+}
+
+// 阶段历史由服务层按当前用户与岗位归属过滤后返回。
+async function getJobProgressHistory(req, res) {
+  const jobId = parseJobId(req)
+  if (!jobId) return error(res, 400, '岗位编号无效')
+  try {
+    const history = await extensionJobService.getJobProgressHistory(req.user.id, jobId)
+    return success(res, { history })
+  } catch (err) {
+    const statusCode = err.statusCode || 500
+    return error(res, statusCode, sanitizePublicError(statusCode, err.message))
+  }
+}
+
 module.exports = {
   analyzeSavedJob,
   removeSavedJob,
+  updateJobProgress,
+  getJobProgressHistory,
 }

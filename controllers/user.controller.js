@@ -4,6 +4,7 @@
 
 const userAiConfigService = require('../services/user/userAiConfig.service')
 const userProfileService = require('../services/user/userProfile.service')
+const careerGoalService = require('../services/user/careerGoal.service')
 const { handleError } = require('../utils/response')
 
 /** 获取当前登录用户资料 */
@@ -121,6 +122,26 @@ async function clearTaskPrompt(req, res) {
   }
 }
 
+async function listCareerGoals(req, res) {
+  try { return res.json({ success: true, data: { goals: await careerGoalService.list(req.user.id) } }) }
+  catch (err) { return handleError(res, err) }
+}
+
+async function createCareerGoal(req, res) {
+  try { return res.status(201).json({ success: true, data: { goal: await careerGoalService.create(req.user.id, req.body || {}) } }) }
+  catch (err) { return handleError(res, err) }
+}
+
+async function updateCareerGoal(req, res) {
+  try { return res.json({ success: true, data: { goal: await careerGoalService.update(req.user.id, req.params.goalId, req.body || {}) } }) }
+  catch (err) { return handleError(res, err) }
+}
+
+async function deleteCareerGoal(req, res) {
+  try { await careerGoalService.remove(req.user.id, req.params.goalId); return res.json({ success: true }) }
+  catch (err) { return handleError(res, err) }
+}
+
 module.exports = {
   getProfile,
   updateProfile,
@@ -131,4 +152,8 @@ module.exports = {
   listTaskPrompts,
   saveTaskPrompt,
   clearTaskPrompt,
+  listCareerGoals,
+  createCareerGoal,
+  updateCareerGoal,
+  deleteCareerGoal,
 }

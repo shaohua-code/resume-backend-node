@@ -94,7 +94,8 @@ router.get('/jobs', authRequired, async (req, res) => {
   try {
     const { rows } = await db.query(
       `SELECT id, source_url, source_platform, source_original, title, company, location, address, salary, skills,
-              resume_id, match_result, status, create_time, update_time
+              resume_id, match_result, status, application_stage, applied_at, next_action_at, progress_note, career_goal_id,
+              create_time, update_time
        FROM public.extension_saved_job
        WHERE user_id = $1
          AND title !~* '^(微信扫码分享|职位描述|岗位描述|职位详情|岗位详情|公司信息|招聘官|收藏|立即沟通|立即投递)$'
@@ -113,7 +114,8 @@ router.get('/jobs/:jobId', authRequired, async (req, res) => {
   try {
     const { rows } = await db.query(
       `SELECT id, source_url, source_platform, source_original, title, company, location, address, salary, skills,
-              jd_text, resume_id, match_result, status, create_time, update_time
+              jd_text, resume_id, match_result, status, application_stage, applied_at, next_action_at,
+              progress_note, career_goal_id, create_time, update_time
        FROM public.extension_saved_job WHERE id = $1 AND user_id = $2 LIMIT 1`,
       [jobId, req.user.id],
     )
@@ -123,6 +125,10 @@ router.get('/jobs/:jobId', authRequired, async (req, res) => {
     return res.status(500).json({ detail: 'Unable to load saved job' })
   }
 })
+
+// 求职进度只允许网页端已登录用户修改；扩展继续只提交岗位识别/分析状态。
+router.patch('/jobs/:jobId/progress', authRequired, extensionController.updateJobProgress)
+router.get('/jobs/:jobId/progress-history', authRequired, extensionController.getJobProgressHistory)
 
 // 网页端重新分析复用 jd_match 的邮箱门禁与 Token 计费，不在扩展模块复制模型配置。
 router.post('/jobs/:jobId/analyze', authRequired, emailBindingRequired, extensionController.analyzeSavedJob)
@@ -161,7 +167,8 @@ router.post('/jobs', authRequired, async (req, res) => {
          source_platform = EXCLUDED.source_platform, source_original = EXCLUDED.source_original,
          jd_text = EXCLUDED.jd_text, resume_id = EXCLUDED.resume_id,
          match_result = EXCLUDED.match_result, status = EXCLUDED.status, update_time = now()
-       RETURNING id, source_url, source_platform, title, company, location, address, salary, skills, status, update_time`,
+       RETURNING id, source_url, source_platform, title, company, location, address, salary, skills, status,
+                 application_stage, applied_at, next_action_at, progress_note, update_time`,
       [
         req.user.id,
         sourceKey,

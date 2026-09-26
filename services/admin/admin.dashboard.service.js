@@ -46,53 +46,79 @@ function startOfDay(offsetDay = 0) {
   return date
 }
 
-function buildRecentMonths(count = 12) {
-  const months = []
-  const cursor = new Date()
-  cursor.setDate(1)
+// 统一把本地日历时间转换成图表桶键，保证筛选区间、对比区间和展示粒度一致。
+function formatDateKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
 
-  for (let i = count - 1; i >= 0; i -= 1) {
-    const date = new Date(cursor.getFullYear(), cursor.getMonth() - i, 1)
-    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
-    months.push(key)
+function formatMonthKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+}
+
+// 将前端枚举限定在已知范围，并预先构造展示桶与等时长比较区间。
+function getRangeDefinition(range, now = new Date()) {
+  const startToday = startOfDay(0)
+  const dayMs = 24 * 60 * 60 * 1000
+  const safeRange = ['今日', '昨日', '7日', '30日', '年度'].includes(range) ? range : '年度'
+
+  if (safeRange === '今日' || safeRange === '昨日') {
+    const start = safeRange === '今日' ? startToday : new Date(startToday.getTime() - dayMs)
+    const end = safeRange === '今日' ? now : new Date(start.getTime() + dayMs)
+    const previousStart = new Date(start.getTime() - dayMs)
+    const previousEnd = safeRange === '今日' ? new Date(previousStart.getTime() + (now.getTime() - start.getTime())) : start
+    const labels = Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, '0')}:00`)
+    const keys = labels.map((_, hour) => `${formatDateKey(start)}T${String(hour).padStart(2, '0')}`)
+    return { range: safeRange, granularity: 'hour', start, end, previousStart, previousEnd, labels, keys }
   }
 
-  return months
+  if (safeRange === '7日' || safeRange === '30日') {
+    const days = safeRange === '7日' ? 7 : 30
+    const start = new Date(startToday.getTime() - (days - 1) * dayMs)
+    const previousStart = new Date(start.getTime() - (now.getTime() - start.getTime()))
+    const labels = Array.from({ length: days }, (_, index) => {
+      const date = new Date(start.getTime() + index * dayMs)
+      return `${date.getMonth() + 1}/${date.getDate()}`
+    })
+    const keys = Array.from({ length: days }, (_, index) => formatDateKey(new Date(start.getTime() + index * dayMs)))
+    return { range: safeRange, granularity: 'day', start, end: now, previousStart, previousEnd: start, labels, keys }
+  }
+
+  const start = new Date(now.getFullYear(), now.getMonth() - 11, 1)
+  const previousStart = new Date(start.getTime() - (now.getTime() - start.getTime()))
+  const labels = Array.from({ length: 12 }, (_, index) => {
+    const date = new Date(start.getFullYear(), start.getMonth() + index, 1)
+    return `${date.getFullYear()}年${date.getMonth() + 1}月`
+  })
+  const keys = Array.from({ length: 12 }, (_, index) => formatMonthKey(new Date(start.getFullYear(), start.getMonth() + index, 1)))
+  return { range: safeRange, granularity: 'month', start, end: now, previousStart, previousEnd: start, labels, keys }
 }
 
-function bucketByMonth(rows, months, predicate) {
-  const counter = months.reduce((acc, key) => {
-    acc[key] = 0
-    return acc
-  }, {})
-
-  ;(rows || []).forEach((row) => {
-    if (predicate && !predicate(row)) return
-    const date = new Date(row.create_time)
-    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
-    if (key in counter) {
-      counter[key] += 1
-    }
-  })
-
-  return months.map((key) => counter[key])
+// 将时间戳映射到与筛选器对应的小时、日期或月份桶，空桶固定补零。
+function getBucketKey(value, granularity) {
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return null
+  if (granularity === 'hour') return `${formatDateKey(date)}T${String(date.getHours()).padStart(2, '0')}`
+  if (granularity === 'day') return formatDateKey(date)
+  return formatMonthKey(date)
 }
 
-function bucketAmountByMonth(rows, months) {
-  const counter = months.reduce((acc, key) => {
-    acc[key] = 0
-    return acc
-  }, {})
-
+function bucketRows(rows, definition, selectValue = () => 1) {
+  const counter = Object.fromEntries(definition.keys.map((key) => [key, 0]))
   ;(rows || []).forEach((row) => {
-    const date = new Date(row.create_time)
-    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
-    if (key in counter) {
-      counter[key] += Math.abs(Number(row.amount || 0))
-    }
+    const key = getBucketKey(row.create_time, definition.granularity)
+    if (key in counter) counter[key] += Number(selectValue(row) || 0)
   })
+  return definition.keys.map((key) => Number(counter[key].toFixed(4)))
+}
 
-  return months.map((key) => Number(counter[key].toFixed(4)))
+// 对比卡片只返回可验证的绝对差；基期为零时百分比留空，避免伪造增长率。
+function buildComparison(value, previous) {
+  return {
+    value,
+    previous,
+    change: value - previous,
+    change_rate: previous === 0 ? null : Number((((value - previous) / previous) * 100).toFixed(1)),
+  }
 }
 
 /**
@@ -168,140 +194,77 @@ async function getStats(req) {
 }
 
 /**
- * 根据时间范围字符串计算起始日期
- * @param {string} range - 时间范围（今日/昨日/7日/30日/年度）
- * @returns {Date} 起始日期
- */
-function getRangeStartDate(range) {
-  const now = new Date()
-
-  switch (range) {
-    case '今日':
-      return startOfDay(0)  // 今天 00:00:00
-    case '昨日':
-      return startOfDay(-1)  // 昨天 00:00:00
-    case '7日':
-      return startOfDay(-7)  // 7天前 00:00:00
-    case '30日':
-      return startOfDay(-30)  // 30天前 00:00:00
-    case '年度':
-    default:
-      // 默认：去年同月1日到现在（12个月数据）
-      return new Date(now.getFullYear() - 1, now.getMonth(), 1)
-  }
-}
-
-/**
- * 根据时间范围获取月份列表
- * @param {string} range - 时间范围
- * @returns {string[]} 月份 key 数组
- */
-function getRangeMonths(range) {
-  if (range === '年度') {
-    return buildRecentMonths(12)  // 12个月
-  }
-  // 其他范围：只返回当前月份（用于单点统计，不显示趋势图）
-  const now = new Date()
-  const key = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-  return [key]
-}
-
-/**
  * 获取管理后台数据中心大盘数据
  * @param {Object} req - Express 请求对象（包含查询参数 range）
  */
 async function getDashboard(req) {
-  // 从查询参数获取时间范围，默认为"年度"
+  // 先固定有效筛选范围与等长前置周期，所有区间卡片与趋势都复用同一口径。
   const range = (req && req.query && req.query.range) || '年度'
-  const rangeStart = getRangeStartDate(range).toISOString()
-  const months = getRangeMonths(range)
-
-  const todayStart = startOfDay(0).toISOString()
-  const yesterdayStart = startOfDay(-1).toISOString()
-
-  // 普通管理员仅统计归属用户；超管不过滤
+  const definition = getRangeDefinition(range)
+  const startIso = definition.start.toISOString()
+  const endIso = definition.end.toISOString()
+  const previousStartIso = definition.previousStart.toISOString()
+  const previousEndIso = definition.previousEnd.toISOString()
   const ownedUserIds = await getOwnedUserIds(req.user)
+  const userScope = (query) => applyUserScope(query, ownedUserIds)
 
-  const [userCount, adminCount, resumeCount, todayNewUsers, yesterdayNewUsers, myWalletStats, consumeLedgerStats, grantLedgerStats] = await Promise.all([
-    getTableCount('user_profile', (query) => applyUserScope(query, ownedUserIds)),
-    userRepo.countUsers((query) => query.in('role', [ROLES.ADMIN, ROLES.SUPER_ADMIN])),
-    getTableCount('resume', (query) => applyUserScope(query, ownedUserIds)),
-    userRepo.countUsers((query) => applyUserScope(query.gte('create_time', todayStart), ownedUserIds)),
-    userRepo.countUsers((query) => applyUserScope(
-      query.gte('create_time', yesterdayStart).lt('create_time', todayStart),
-      ownedUserIds,
-    )),
+  const rangeFilter = (start, end) => (query) => userScope(query.gte('create_time', start).lt('create_time', end))
+  const [userCount, resumeCount, currentUsers, previousUsers, currentResumes, previousResumes, currentAiCount, previousAiCount,
+    myWalletStats, consumeLedgerStats, grantLedgerStats] = await Promise.all([
+    getTableCount('user_profile', userScope),
+    getTableCount('resume', userScope),
+    userRepo.countUsers(rangeFilter(startIso, endIso)),
+    userRepo.countUsers(rangeFilter(previousStartIso, previousEndIso)),
+    getTableCount('resume', rangeFilter(startIso, endIso)),
+    getTableCount('resume', rangeFilter(previousStartIso, previousEndIso)),
+    aiCallRepo.countAiCalls(rangeFilter(startIso, endIso)),
+    aiCallRepo.countAiCalls(rangeFilter(previousStartIso, previousEndIso)),
     getMyWalletStats(req),
-    // AI 消费趋势：仅当前管理员自己的 AI_CONSUME（与「累计消费」卡片口径一致）
-    dbAdmin
-      .from('balance_ledger')
-      .select('amount,type,create_time,user_id')
-      .eq('type', 'AI_CONSUME')
-      .eq('user_id', req.user.id)
-      .gte('create_time', rangeStart),
-    // 额度发放：仅当前管理员自己钱包上的 ADMIN_GRANT 扣款
-    dbAdmin
-      .from('balance_ledger')
-      .select('amount,type,create_time,user_id')
-      .eq('type', 'ADMIN_GRANT')
-      .eq('user_id', req.user.id)
-      .lt('amount', 0)
-      .gte('create_time', rangeStart),
+    dbAdmin.from('balance_ledger').select('amount,create_time').eq('type', 'AI_CONSUME')
+      .eq('user_id', req.user.id).gte('create_time', startIso).lt('create_time', endIso),
+    dbAdmin.from('balance_ledger').select('amount,create_time').eq('type', 'ADMIN_GRANT')
+      .eq('user_id', req.user.id).lt('amount', 0).gte('create_time', startIso).lt('create_time', endIso),
   ])
 
+  // 当前区间明细只取图表所需字段，归属范围由同一管理员边界统一限定。
+  let userTrendQuery = dbAdmin.from('user_profile').select('create_time').gte('create_time', startIso).lt('create_time', endIso)
+  userTrendQuery = userScope(userTrendQuery)
+  const [{ data: userRows }, { data: aiRows }] = await Promise.all([
+    userTrendQuery,
+    aiCallRepo.findAllAiCalls(startIso, endIso, ownedUserIds),
+  ])
+
+  const uniqueActiveUsers = new Set((aiRows || []).map((row) => row.user_id).filter(Boolean)).size
+  const { data: announcements } = await dbAdmin
+    .from('announcement').select('id,title,enabled,create_time')
+    .order('create_time', { ascending: false }).limit(5)
+
+  const { my_balance: myBalance, my_consumed: myConsumed, my_granted: myGranted } = myWalletStats
   const aiConsumeRows = consumeLedgerStats.data || []
   const grantRows = grantLedgerStats.data || []
 
-  let userTrendQuery = dbAdmin
-    .from('user_profile')
-    .select('create_time,role,user_id')
-    .gte('create_time', rangeStart)
-  userTrendQuery = applyUserScope(userTrendQuery, ownedUserIds)
-
-  const [{ data: userRows }, { data: aiRows }] = await Promise.all([
-    userTrendQuery,
-    aiCallRepo.findAllAiCalls(rangeStart, ownedUserIds),
-  ])
-
-  const userTrend = bucketByMonth(userRows, months)
-  const consumeTrend = bucketAmountByMonth(aiConsumeRows, months)
-  const grantTrend = bucketAmountByMonth(grantRows, months)
-  const aiTrend = bucketByMonth(aiRows, months, () => true)
-
-  const { data: announcements } = await dbAdmin
-    .from('announcement')
-    .select('id,title,enabled,create_time')
-    .order('create_time', { ascending: false })
-    .limit(5)
-
-  const { error: dbError } = await dbAdmin.from('system_config').select('config_key').limit(1)
-  const systemStatus = {
-    api: 'ok',
-    db: dbError ? 'error' : 'ok',
-    ai: 'ok',
-    storage: 'ok',
-  }
-
-  // 当前管理员个人钱包数据（余额、AI 消费、额度发放总额）
-  const { my_balance: myBalance, my_consumed: myConsumed, my_granted: myGranted } = myWalletStats
-
   return {
+    range: definition.range,
+    range_start: startIso,
+    range_end: endIso,
+    scope: ownedUserIds === null ? 'all' : 'owned',
     user_count: userCount,
-    admin_count: adminCount,
     resume_count: resumeCount,
-    ai_call_count: aiTrend.reduce((sum, value) => sum + value, 0),
-    today_new_users: todayNewUsers,
-    user_growth: todayNewUsers - yesterdayNewUsers,
+    period_summary: {
+      users: buildComparison(currentUsers, previousUsers),
+      resumes: buildComparison(currentResumes, previousResumes),
+      ai_calls: buildComparison(currentAiCount, previousAiCount),
+      active_users: uniqueActiveUsers,
+    },
     my_balance: myBalance,
     my_consumed: myConsumed,
     my_granted: myGranted,
-    months,
-    user_trend: userTrend,
-    consume_trend: consumeTrend,
-    grant_trend: grantTrend,
-    ai_trend: aiTrend,
+    labels: definition.labels,
+    user_trend: bucketRows(userRows, definition),
+    ai_trend: bucketRows(aiRows, definition),
+    consume_trend: bucketRows(aiConsumeRows, definition, (row) => Math.abs(Number(row.amount || 0))),
+    grant_trend: bucketRows(grantRows, definition, (row) => Math.abs(Number(row.amount || 0))),
     recent_announcements: announcements || [],
-    system_status: systemStatus,
   }
 }
 

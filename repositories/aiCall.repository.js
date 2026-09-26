@@ -65,16 +65,18 @@ function applyUserIdsFilter(query, userIds) {
 }
 
 /**
- * 查询指定时间之后的所有 AI 调用记录，用于趋势统计
- * @param {string} yearStart - 起始时间 ISO 字符串
+ * 查询指定起止时间内的 AI 调用用户与时间，用于趋势及活跃用户统计
+ * @param {string} startTime - 起始时间 ISO 字符串（含）
+ * @param {string} endTime - 截止时间 ISO 字符串（不含）
  * @param {string[]|null} [userIds] - 归属用户过滤；null 表示不过滤
  * @returns {Promise<Object>} PostgreSQL 查询结果 { data, error }
  */
-async function findAllAiCalls(yearStart, userIds = null) {
+async function findAllAiCalls(startTime, endTime, userIds = null) {
   let query = dbAdmin
     .from('ai_call_record')
-    .select('create_time')
-    .gte('create_time', yearStart)
+    .select('create_time,user_id')
+    .gte('create_time', startTime)
+    .lt('create_time', endTime)
   query = applyUserIdsFilter(query, userIds)
   return query
 }

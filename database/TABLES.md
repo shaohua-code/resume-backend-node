@@ -1,12 +1,12 @@
 # 数据库表中文对照
 
-项目共 **29 张表**，建表脚本见 [`init.sql`](init.sql)。
+全新安装以 [`init.sql`](init.sql) 为结构权威来源；当前共 **31 张表**。既有数据库的求职进度与求职目标升级 SQL 为 [`20260926_career_goals.sql`](migrations/20260926_career_goals.sql)，覆盖岗位进度字段、阶段历史表、求职目标表及岗位目标外键；应用状态须在部署前核实。
 
 验证表数量：
 
 ```sql
 SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
--- 预期：29
+-- 预期：31
 ```
 
 ---
@@ -309,7 +309,8 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 
 | 脚本 | 用途 |
 |---|---|
-| [`init.sql`](init.sql) | 唯一数据库结构初始化脚本；不保留额外迁移、重置或清理 SQL |
+| [`init.sql`](init.sql) | 全新安装结构权威来源（31 张表） |
+| [`migrations/20260926_career_goals.sql`](migrations/20260926_career_goals.sql) | 既有数据库的一次性求职进度与目标增量 SQL；要求基础用户和岗位表存在，部署前备份并人工执行、验证 |
 
 ---
 
@@ -345,7 +346,9 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | `recharge_request` | 充值凭证申请表 | 用户提交凭证、管理员审核入账 |
 | `visit_log` | 访问日志表 | 网站访问统计 |
 | `extension_auth_code` | 扩展授权码表 | 仅保存一次性授权码哈希，原子消费后签发扩展会话 |
-| `extension_saved_job` | 浏览器收藏岗位表 | 用户隔离的岗位来源、JD、匹配结果与状态 |
+| `extension_saved_job` | 浏览器收藏岗位表 | 用户隔离的岗位来源、JD、AI 状态与求职进度 |
+| `extension_job_progress_history` | 岗位阶段历史 | 用户隔离的求职阶段变化记录 |
+| `career_goal` | 求职目标 | 用户隔离的求职方向、状态及岗位关联 |
 
 ---
 
@@ -359,12 +362,33 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | 安全约束 | 仅保存授权码哈希；交换接口以 `DELETE ... RETURNING` 原子消费，扩展不持有网页 refresh token。 |
 | 代码路径 | `routers/extension.js` |
 
+### career_goal - 求职目标
+
+| 项目 | 说明 |
+|---|---|
+| 核心字段 | `user_id`、`name`、`job_direction`、`target_city`、`career_stage`、`salary_expectation`、`status`、`is_primary` |
+| 状态 | `active`、`paused`、`completed`；用户可切换主目标，首次创建自动设为主目标。 |
+| 删除行为 | 删除目标仅解除岗位外键关联，不级联删除岗位或简历。 |
+| 数据隔离 | 列表、更新、删除及岗位关联校验均按当前 `user_id` 过滤。 |
+| 代码路径 | `services/user/careerGoal.service.js`、`routers/user.js`、`src/views/user/components/CareerGoalsPanel.vue` |
+
 ### extension_saved_job - 我的收藏岗位
 
 | 项目 | 说明 |
 |---|---|
-| 核心字段 | `user_id`、`source_key`、`source_url`、`source_platform`、`source_original`、`title`、`company`、`location`、`address`、`salary`、`skills`、`jd_text`、`resume_id`、`match_result`、`status` |
+| 核心字段 | `user_id`、`source_key`、`source_url`、`source_platform`、`source_original`、`title`、`company`、`location`、`address`、`salary`、`skills`、`jd_text`、`resume_id`、`match_result`、`status`、`application_stage`、`applied_at`、`next_action_at`、`progress_note`、`career_goal_id` |
 | 约束 | `(user_id, source_key)` 唯一；保存时优先按 `source_url` 更新已有记录，字段补全不会生成重复收藏。 |
-| 状态 | `saved`、`ready`、`applied`、`archived`。Agent 只能保存或准备，不会自动投递。 |
+| AI 状态 | `status` 为 `saved`、`ready`、`applied`、`archived`；Agent 只保存或分析岗位，不会自动投递。 |
+| 求职阶段 | `application_stage` 为 `saved`、`preparing`、`applied`、`interviewing`、`offer`、`rejected`、`withdrawn`、`archived`；只由用户在网页端维护，旧记录默认 `saved`。 |
+| 目标关联 | `career_goal_id` 可空；仅允许关联当前用户的未完成目标；删除目标后岗位记录保留并自动解除关联。 |
 | 识别数据 | `jd_text` 只保存当前岗位的职责与要求；平台来源、转载来源、完整地址和显式技能分别存储，避免再次从混合文本中猜字段。 |
 | 代码路径 | `routers/extension.js`；网页端 `src/api/extensionJobs.js` 与浏览器扩展共用接口。 |
+
+### extension_job_progress_history - 岗位求职阶段历史
+
+| 项目 | 说明 |
+|---|---|
+| 核心字段 | `user_id`、`job_id`、`from_stage`、`to_stage`、`note`、`create_time` |
+| 事务约束 | 阶段变化与岗位当前阶段在同一事务提交；重复保存相同阶段不重复生成历史。 |
+| 数据隔离 | 查询同时按当前 `user_id` 和 `job_id` 过滤；删除岗位时级联清除该岗位历史。 |
+| 代码路径 | `repositories/extension-job.repository.js`、`services/extension/extension-job.service.js` |

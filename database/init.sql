@@ -105,6 +105,61 @@ ALTER TABLE public.extension_saved_job ADD COLUMN IF NOT EXISTS skills JSONB NOT
 ALTER TABLE public.extension_saved_job ADD COLUMN IF NOT EXISTS source_platform TEXT DEFAULT '';
 ALTER TABLE public.extension_saved_job ADD COLUMN IF NOT EXISTS source_original TEXT DEFAULT '';
 
+-- 求职阶段独立于扩展分析状态保存，重复识别岗位不得重置用户已维护的求职进度。
+ALTER TABLE public.extension_saved_job ADD COLUMN IF NOT EXISTS application_stage TEXT NOT NULL DEFAULT 'saved';
+ALTER TABLE public.extension_saved_job ADD COLUMN IF NOT EXISTS applied_at DATE;
+ALTER TABLE public.extension_saved_job ADD COLUMN IF NOT EXISTS next_action_at DATE;
+ALTER TABLE public.extension_saved_job ADD COLUMN IF NOT EXISTS progress_note TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.extension_saved_job DROP CONSTRAINT IF EXISTS extension_saved_job_application_stage_check;
+ALTER TABLE public.extension_saved_job
+  ADD CONSTRAINT extension_saved_job_application_stage_check
+  CHECK (application_stage IN ('saved', 'preparing', 'applied', 'interviewing', 'offer', 'rejected', 'withdrawn', 'archived'));
+CREATE INDEX IF NOT EXISTS idx_extension_saved_job_next_action
+  ON public.extension_saved_job(user_id, next_action_at)
+  WHERE next_action_at IS NOT NULL AND application_stage <> 'archived';
+
+-- 求职目标让岗位进度形成长期上下文；目标软删除时岗位仍可正常访问。
+CREATE TABLE IF NOT EXISTS public.career_goal (
+  id BIGSERIAL PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL CHECK (char_length(name) BETWEEN 1 AND 80),
+  job_direction TEXT NOT NULL DEFAULT '',
+  target_city TEXT NOT NULL DEFAULT '',
+  career_stage TEXT NOT NULL DEFAULT '',
+  salary_expectation TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'completed')),
+  is_primary BOOLEAN NOT NULL DEFAULT false,
+  create_time TIMESTAMPTZ NOT NULL DEFAULT now(),
+  update_time TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_career_goal_user_status
+  ON public.career_goal(user_id, status, is_primary DESC, update_time DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_career_goal_one_primary_per_user
+  ON public.career_goal(user_id) WHERE is_primary = true;
+
+ALTER TABLE public.extension_saved_job ADD COLUMN IF NOT EXISTS career_goal_id BIGINT;
+DO $$ BEGIN
+  ALTER TABLE public.extension_saved_job
+    ADD CONSTRAINT extension_saved_job_career_goal_fk
+    FOREIGN KEY (career_goal_id) REFERENCES public.career_goal(id) ON DELETE SET NULL;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+CREATE INDEX IF NOT EXISTS idx_extension_saved_job_goal
+  ON public.extension_saved_job(user_id, career_goal_id, update_time DESC);
+
+-- 阶段历史与岗位进度更新使用同一事务写入，便于用户回顾时间线且不出现无记录的状态跳变。
+CREATE TABLE IF NOT EXISTS public.extension_job_progress_history (
+  id BIGSERIAL PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  job_id BIGINT NOT NULL REFERENCES public.extension_saved_job(id) ON DELETE CASCADE,
+  from_stage TEXT NOT NULL,
+  to_stage TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  create_time TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_extension_job_progress_history_job
+  ON public.extension_job_progress_history(user_id, job_id, create_time DESC, id DESC);
+
 -- ========== 2. 用户资料 ==========
 
 CREATE TABLE IF NOT EXISTS public.user_profile (

@@ -33,7 +33,8 @@ resume-backend-node/
 ├── validators/             # express-validator 参数校验规则
 ├── utils/                  # 响应封装、JSON 提取、权限、费用计算
 ├── database/
-│   ├── init.sql            # 完整建表脚本（22 张表）
+│   ├── init.sql            # 全新安装权威建表脚本（31 张表）
+│   ├── migrations/         # 既有数据库的一次性生产增量 SQL（需先备份并人工执行）
 │   └── TABLES.md           # 表结构中文对照
 └── data/uploads/           # 本地上传目录（开发默认，生产用 UPLOAD_DIR）
 ```
@@ -72,6 +73,7 @@ resume-backend-node/
 | `/api/pdf` | `routers/pdf.js` | PDF 上传、事实识别、历史 AI 整体优化接口（需绑定邮箱）与普通文件管理 |
 | `/api/resume` | `routers/resume.js` | 简历 CRUD、导出记录 |
 | `/api/wallet` | `routers/wallet.js` | 用户余额与流水 |
+| `/api/user` | `routers/user.js` | 账户资料、求职目标 CRUD、个人 AI 任务配置 |
 | `/api/admin` | `routers/admin.js` | 管理后台：用户、额度、AI 调用、简历、配置、反馈等 |
 | `/api/upload` | `routers/upload.js` | 通用文件上传 |
 | `/api/feedback` | `routers/feedback.js` | 用户反馈 |
@@ -188,11 +190,13 @@ npm start
 
 ### PostgreSQL 数据库
 
-首次部署或表结构变更时执行：
+全新空数据库的结构权威脚本是 `database/init.sql`。**已有数据库不要重复执行初始化脚本。**升级既有库以部署求职进度与求职目标功能时，先备份，再从后端目录执行：
 
 ```bash
-psql -h 127.0.0.1 -U ai_resume -d ai_resume -f database/init.sql
+psql -h 127.0.0.1 -U ai_resume -d ai_resume -v ON_ERROR_STOP=1 -f database/migrations/20260926_career_goals.sql
 ```
+
+该增量脚本要求 `public.users` 与 `public.extension_saved_job` 已存在；脚本末尾会输出结构核验结果。仅在全新空库安装时使用 `init.sql`，并先在隔离数据库验证初始化顺序。
 
 表结构中文对照见 [`database/TABLES.md`](database/TABLES.md)。
 
