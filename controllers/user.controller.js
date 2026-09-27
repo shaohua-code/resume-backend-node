@@ -5,6 +5,7 @@
 const userAiConfigService = require('../services/user/userAiConfig.service')
 const userProfileService = require('../services/user/userProfile.service')
 const careerGoalService = require('../services/user/careerGoal.service')
+const { recordServerEvent } = require('../services/productEvents/productEvents.service')
 const { handleError } = require('../utils/response')
 
 /** 获取当前登录用户资料 */
@@ -128,7 +129,12 @@ async function listCareerGoals(req, res) {
 }
 
 async function createCareerGoal(req, res) {
-  try { return res.status(201).json({ success: true, data: { goal: await careerGoalService.create(req.user.id, req.body || {}) } }) }
+  try {
+    const goal = await careerGoalService.create(req.user.id, req.body || {})
+    void recordServerEvent(req.user.id, 'career_goal_created', { is_primary: goal.is_primary ? 'true' : 'false' }).catch(() => {})
+    void recordServerEvent(req.user.id, 'onboarding_step_completed', { step_id: 'goal' }).catch(() => {})
+    return res.status(201).json({ success: true, data: { goal } })
+  }
   catch (err) { return handleError(res, err) }
 }
 

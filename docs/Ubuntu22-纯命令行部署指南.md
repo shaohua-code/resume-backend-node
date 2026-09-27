@@ -167,13 +167,13 @@ nano /tmp/init.sql
 psql -h 127.0.0.1 -U ai_resume -d ai_resume -f /tmp/init.sql
 ```
 
-### 4.3 验证（应有 22 张表）
+### 4.3 验证（应有 33 张表）
 
 ```bash
 psql -h 127.0.0.1 -U ai_resume -d ai_resume -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';"
 ```
 
-预期输出：`20`
+预期输出：`33`
 
 查看表名：
 
@@ -575,13 +575,13 @@ ON CONFLICT (user_id) DO UPDATE SET balance = 1000000, update_time = now();
 
 ### 11.3 数据库脚本边界
 
-`database/init.sql` 仅用于全新数据库初始化，不能作为已有生产库的升级脚本。已有库部署求职进度与求职目标功能时，先确认目标数据库与 `users`、`extension_saved_job` 基础表，再备份并执行 `database/migrations/20260926_career_goals.sql`：
+`database/init.sql` 仅用于全新数据库初始化，不能作为已有生产库的升级脚本。已有库部署求职进度、求职目标、留存事件和工作台功能时，先确认目标数据库与 `users`、`extension_saved_job` 基础表，再备份并执行统一升级文件：
 
 ```bash
-psql -h 127.0.0.1 -U ai_resume -d ai_resume -v ON_ERROR_STOP=1 -f database/migrations/20260926_career_goals.sql
+psql -h 127.0.0.1 -U ai_resume -d ai_resume -v ON_ERROR_STOP=1 -f database/migrations/20260927_full_workspace_upgrade.sql
 ```
 
-执行后核对脚本末尾的表和字段检查结果，再部署后端。不得在生产执行全库重置、清理或不适用的初始化脚本。
+先备份目标库，执行后核对脚本末尾的表、字段、索引和外键检查结果，再部署后端。不要再单独运行旧分项文件，也不得在生产执行全库重置、清理或不适用的初始化脚本。
 
 ---
 
@@ -591,7 +591,7 @@ psql -h 127.0.0.1 -U ai_resume -d ai_resume -v ON_ERROR_STOP=1 -f database/migra
 □ 1. SSH 能登录
 □ 2. PostgreSQL 运行中：sudo systemctl status postgresql
 □ 3. 数据库 ai_resume 已创建
-□ 4. 全新数据库已初始化，或既有数据库已执行适用的增量脚本；当前结构契约 = 31 张表
+□ 4. 全新数据库已初始化，或既有数据库已执行适用的增量脚本；当前结构契约 = 33 张表
 □ 5. 代码在 /var/www/resume-backend-node
 □ 6. .env 中 DATABASE_URL 用 127.0.0.1
 □ 7. pm2 status 显示 online

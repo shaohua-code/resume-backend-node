@@ -17,6 +17,7 @@ router.use(requireAdmin)
 // 统计与大盘
 router.get('/stats', requirePermission(PERMISSIONS.ADMIN_STATS), adminController.getStats)
 router.get('/dashboard', requirePermission(PERMISSIONS.ADMIN_STATS), adminController.getDashboard)
+router.get('/retention', requirePermission(PERMISSIONS.ADMIN_STATS), adminController.getRetentionSummary)
 
 // 用户管理
 router.get('/users', requirePermission(PERMISSIONS.ADMIN_MANAGE_USERS), adminController.listUsers)

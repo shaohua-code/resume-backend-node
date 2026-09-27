@@ -5,6 +5,7 @@ const extensionJobRepo = require('../../repositories/extension-job.repository')
 const resumeRepo = require('../../repositories/resume.repository')
 const aiService = require('../ai/ai.service')
 const db = require('../../lib/db')
+const { recordServerEvent } = require('../productEvents/productEvents.service')
 
 const APPLICATION_STAGES = new Set([
   'saved', 'preparing', 'applied', 'interviewing', 'offer', 'rejected', 'withdrawn', 'archived',
@@ -94,8 +95,16 @@ async function updateJobProgress(userId, jobId, input = {}) {
       progress.career_goal_id = goalId
     }
   }
-  const job = await extensionJobRepo.updateProgress(userId, jobId, progress)
-  if (!job) throw businessError('收藏岗位不存在或已被删除', 404)
+  const result = await extensionJobRepo.updateProgress(userId, jobId, progress)
+  if (!result) throw businessError('收藏岗位不存在或已被删除', 404)
+  const job = result.job
+  if (result.fromStage !== job.application_stage) {
+    void recordServerEvent(userId, 'job_stage_changed', {
+      from_stage: result.fromStage,
+      to_stage: job.application_stage,
+      has_next_action_date: job.next_action_at ? 'true' : 'false',
+    }).catch(() => {})
+  }
   return job
 }
 

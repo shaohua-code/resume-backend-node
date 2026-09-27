@@ -1,12 +1,12 @@
 # 数据库表中文对照
 
-全新安装以 [`init.sql`](init.sql) 为结构权威来源；当前共 **31 张表**。既有数据库的求职进度与求职目标升级 SQL 为 [`20260926_career_goals.sql`](migrations/20260926_career_goals.sql)，覆盖岗位进度字段、阶段历史表、求职目标表及岗位目标外键；应用状态须在部署前核实。
+全新安装以 [`init.sql`](init.sql) 为结构权威来源；当前共 **33 张表**。既有数据库升级统一执行 [`20260927_full_workspace_upgrade.sql`](migrations/20260927_full_workspace_upgrade.sql)，一次补齐求职进度/目标、留存事件与工作台引导状态。执行前备份并确认基础表存在；原分项迁移文件留作历史来源，不要与整合脚本重复执行。
 
 验证表数量：
 
 ```sql
 SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
--- 预期：31
+-- 预期：33
 ```
 
 ---
@@ -309,8 +309,9 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 
 | 脚本 | 用途 |
 |---|---|
-| [`init.sql`](init.sql) | 全新安装结构权威来源（31 张表） |
-| [`migrations/20260926_career_goals.sql`](migrations/20260926_career_goals.sql) | 既有数据库的一次性求职进度与目标增量 SQL；要求基础用户和岗位表存在，部署前备份并人工执行、验证 |
+| [`init.sql`](init.sql) | 全新安装结构权威来源（33 张表） |
+| [`migrations/20260927_full_workspace_upgrade.sql`](migrations/20260927_full_workspace_upgrade.sql) | 既有数据库统一升级入口（目标/岗位进度、留存事件与工作台引导），Docker/PostgreSQL 人工执行 |
+| `migrations/20260926_career_goals.sql`、`20260927_retention_workspace.sql` | 原分项迁移来源，保留用于追溯；执行统一入口后不要再次单独运行 |
 
 ---
 
@@ -392,3 +393,20 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | 事务约束 | 阶段变化与岗位当前阶段在同一事务提交；重复保存相同阶段不重复生成历史。 |
 | 数据隔离 | 查询同时按当前 `user_id` 和 `job_id` 过滤；删除岗位时级联清除该岗位历史。 |
 | 代码路径 | `repositories/extension-job.repository.js`、`services/extension/extension-job.service.js` |
+
+### product_event - 产品行为事件
+
+| 项目 | 说明 |
+|---|---|
+| 核心字段 | `event_id`、可空 `user_id`、会话/匿名 ID、白名单事件名、发生/接收时间、受限 JSON 属性 |
+| 安全 | 后端按事件和属性白名单校验；未知字段和自由文本不会入库；删除用户时按外键清除可识别事件 |
+| 保留 | 原始事件建议最多 90 天；部署定时清理后再视为已落实保留策略 |
+| 代码路径 | `services/productEvents/productEvents.service.js`、`POST /api/product-events` |
+
+### user_onboarding_state - 用户引导状态
+
+| 项目 | 说明 |
+|---|---|
+| 核心字段 | `user_id`、引导版本、已完成步骤数组、是否关闭、更新时间 |
+| 隔离 | 每个用户一条记录；删除用户时级联清理 |
+| 代码路径 | `services/workspace/workspace.service.js`、`GET/PATCH /api/workspace/onboarding` |

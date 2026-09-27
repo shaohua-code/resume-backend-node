@@ -1,24 +1,19 @@
 -- ============================================================
--- AI 简历 - 宝塔 PostgreSQL 完整建库脚本
--- 数据库：ai-resume @ 175.178.62.55
--- 执行环境：宝塔面板 → 数据库 → PostgreSQL → SQL 执行
--- 幂等：可重复执行（IF NOT EXISTS / ON CONFLICT）
+-- AI 简历 PostgreSQL 全新安装/结构补齐脚本
+-- 仅对确认目标的数据库执行；既有库增量升级请使用 database/migrations 中的适用脚本。
+-- 幂等：可重复执行（IF NOT EXISTS / ON CONFLICT），不会替代备份与升级核验。
 -- ============================================================
 --
--- 【宝塔操作步骤】
--- 1. 宝塔 → 软件商店 → 安装 PostgreSQL
--- 2. 数据库 → PostgreSQL → 添加数据库 ai-resume / 用户 ai-resume
--- 3. 点管理 → SQL 执行 → 粘贴本文件全文 → 执行
--- 4. 验证：SELECT count(*) FROM information_schema.tables WHERE table_schema='public'; -- 预期 22
+-- 【执行说明】
+-- 此文件不包含环境账号、地址或密码；请勿将全新安装脚本用于已有生产库。
+-- 当前结构契约为 33 张表；既有数据库先执行适用的增量升级文件。
 --
 -- 【后端 .env】
--- DATABASE_URL=postgresql://ai-resume:密码@175.178.62.55:5432/ai-resume
+-- DATABASE_URL=postgresql://<user>:<password>@<host>:5432/<database>
 --
 -- 【创建超级管理员】注册账号后执行：
 -- UPDATE public.user_profile SET role='SUPER_ADMIN' WHERE email='你的邮箱';
--- INSERT INTO public.user_wallet (user_id, balance, total_consumed, update_time)
--- SELECT user_id, 1000000, 0, now() FROM public.user_profile WHERE email='你的邮箱'
--- ON CONFLICT (user_id) DO UPDATE SET balance = 1000000, update_time = now();
+-- 额度应通过管理后台按需调整，避免重复执行 SQL 重置钱包余额或绕过流水审计。
 -- ============================================================
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
@@ -39,6 +34,32 @@ CREATE TABLE IF NOT EXISTS public.users (
     NULLIF(BTRIM(email), '') IS NOT NULL OR NULLIF(BTRIM(account), '') IS NOT NULL
   ),
   CONSTRAINT chk_users_account_lowercase CHECK (account IS NULL OR account = LOWER(account))
+);
+
+-- 用户表先创建，再建立引用它的匿名行为事件和引导状态表。
+CREATE TABLE IF NOT EXISTS public.product_event (
+  event_id UUID PRIMARY KEY,
+  user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  anonymous_id UUID,
+  session_id UUID NOT NULL,
+  event_name TEXT NOT NULL,
+  occurred_at TIMESTAMPTZ NOT NULL,
+  properties JSONB NOT NULL DEFAULT '{}'::jsonb,
+  received_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_product_event_time_name
+  ON public.product_event(occurred_at DESC, event_name);
+CREATE INDEX IF NOT EXISTS idx_product_event_user_time
+  ON public.product_event(user_id, occurred_at DESC)
+  WHERE user_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS public.user_onboarding_state (
+  user_id UUID PRIMARY KEY REFERENCES public.users(id) ON DELETE CASCADE,
+  version INT NOT NULL DEFAULT 1,
+  completed_steps TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+  dismissed BOOLEAN NOT NULL DEFAULT false,
+  update_time TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_user_onboarding_steps CHECK (completed_steps <@ ARRAY['goal','resume','job']::TEXT[])
 );
 
 CREATE TABLE IF NOT EXISTS public.otp_codes (
@@ -90,7 +111,8 @@ CREATE TABLE IF NOT EXISTS public.extension_saved_job (
   source_platform TEXT DEFAULT '',
   source_original TEXT DEFAULT '',
   jd_text TEXT NOT NULL,
-  resume_id BIGINT REFERENCES public.resume(id) ON DELETE SET NULL,
+  -- resume 在本文件后续定义；外键在 resume 建表后补充。
+  resume_id BIGINT,
   match_result JSONB NOT NULL DEFAULT '{}'::jsonb,
   status TEXT NOT NULL DEFAULT 'saved' CHECK (status IN ('saved', 'ready', 'applied', 'archived')),
   create_time TIMESTAMPTZ DEFAULT now(),
@@ -243,6 +265,31 @@ CREATE TABLE IF NOT EXISTS public.resume (
   create_time TIMESTAMPTZ DEFAULT now(),
   update_time TIMESTAMPTZ DEFAULT now()
 );
+-- 岗位表先于简历表创建，因此延后添加外键，并在发现孤儿引用时明确中止初始化。
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint c
+    JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+    WHERE c.conrelid = 'public.extension_saved_job'::regclass
+      AND c.confrelid = 'public.resume'::regclass
+      AND c.contype = 'f'
+      AND a.attname = 'resume_id'
+  ) THEN
+    IF EXISTS (
+      SELECT 1
+      FROM public.extension_saved_job j
+      LEFT JOIN public.resume r ON r.id = j.resume_id
+      WHERE j.resume_id IS NOT NULL AND r.id IS NULL
+    ) THEN
+      RAISE EXCEPTION 'extension_saved_job.resume_id 存在无效简历引用，请先修复数据后重试';
+    END IF;
+    ALTER TABLE public.extension_saved_job
+      ADD CONSTRAINT extension_saved_job_resume_id_fkey
+      FOREIGN KEY (resume_id) REFERENCES public.resume(id) ON DELETE SET NULL;
+  END IF;
+END $$;
 -- 生成结果保存使用用户级幂等键；网络响应丢失后的重试返回原记录，不重复创建或替换简历。
 ALTER TABLE public.resume ADD COLUMN IF NOT EXISTS client_request_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_resume_user_id ON public.resume(user_id);

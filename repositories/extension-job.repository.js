@@ -108,7 +108,7 @@ async function updateProgress(userId, jobId, progress) {
     }
     await client.query('COMMIT')
     transactionOpen = false
-    return rows[0] || null
+    return rows[0] ? { job: rows[0], fromStage: currentStage } : null
   } catch (error) {
     if (transactionOpen) await client.query('ROLLBACK')
     throw error

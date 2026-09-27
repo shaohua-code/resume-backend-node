@@ -20,6 +20,8 @@ const rechargeService = require('../services/admin/admin.recharge.service');
 const rechargeRequestService = require('../services/admin/admin.rechargeRequest.service');
 const announcementService = require('../services/announcement/announcement.service');
 const userAiConfigService = require('../services/user/userAiConfig.service');
+const retentionService = require('../services/admin/admin.retention.service');
+const { recordServerEvent } = require('../services/productEvents/productEvents.service');
 const { handleError } = require('../utils/response');
 
 /**
@@ -63,6 +65,16 @@ async function getDashboard(req, res) {
     return res.json({ success: true, data });
   } catch (err) {
     return handleError(res, err);
+  }
+}
+
+async function getRetentionSummary(req, res) {
+  try {
+    // 将管理员身份交给聚合服务，由服务端统一应用 SUPER_ADMIN 全局或 ADMIN 归属范围。
+    const data = await retentionService.getSummary(req.query.days, req.user)
+    return res.json({ success: true, data })
+  } catch (err) {
+    return handleError(res, err)
   }
 }
 
@@ -644,6 +656,13 @@ async function previewRechargeEmail(req, res) {
 async function approveRechargeRequest(req, res) {
   try {
     const data = await rechargeRequestService.approveRequest(req, req.params.id, req.body || {});
+    const amount = Number(data.paid_amount || 0)
+    const amountBucket = amount < 10 ? 'under_10' : amount < 50 ? '10_50' : amount < 200 ? '50_200' : 'over_200'
+    void recordServerEvent(data.user_id, 'recharge_flow_step', {
+      step: 'credited',
+      amount_bucket: amountBucket,
+      result: 'success',
+    }).catch(() => {})
     return res.json({ success: true, data, message: '充值已入账' });
   } catch (err) {
     return handleError(res, err);
@@ -683,6 +702,7 @@ async function updateRechargeEmailTemplates(req, res) {
 module.exports = {
   getStats,
   getDashboard,
+  getRetentionSummary,
   listUsers,
   getUser,
   updateUser,

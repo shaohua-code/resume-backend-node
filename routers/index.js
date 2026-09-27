@@ -16,6 +16,8 @@ const visitRouter = require('./visit')
 const announcementRouter = require('./announcement')
 const userRouter = require('./user')
 const extensionRouter = require('./extension')
+const productEventsRouter = require('./productEvents')
+const workspaceRouter = require('./workspace')
 
 const router = express.Router()
 
@@ -31,5 +33,7 @@ router.use('/visits', visitRouter)
 router.use('/announcements', announcementRouter)
 router.use('/user', userRouter)
 router.use('/extension', extensionRouter)
+router.use('/product-events', productEventsRouter)
+router.use('/workspace', workspaceRouter)
 
 module.exports = router

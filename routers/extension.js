@@ -11,6 +11,7 @@ const db = require('../lib/db')
 const { signAccessToken } = require('../lib/jwt')
 const { authRequired, emailBindingRequired } = require('../middlewares/auth')
 const extensionController = require('../controllers/extension.controller')
+const { recordServerEvent } = require('../services/productEvents/productEvents.service')
 const { settings } = require('../config')
 
 const router = express.Router()
@@ -168,7 +169,7 @@ router.post('/jobs', authRequired, async (req, res) => {
          jd_text = EXCLUDED.jd_text, resume_id = EXCLUDED.resume_id,
          match_result = EXCLUDED.match_result, status = EXCLUDED.status, update_time = now()
        RETURNING id, source_url, source_platform, title, company, location, address, salary, skills, status,
-                 application_stage, applied_at, next_action_at, progress_note, update_time`,
+                 application_stage, applied_at, next_action_at, progress_note, career_goal_id, update_time`,
       [
         req.user.id,
         sourceKey,
@@ -187,6 +188,16 @@ router.post('/jobs', authRequired, async (req, res) => {
         status,
       ],
     )
+    const platform = String(sourcePlatform || '').toLowerCase()
+    const sourcePlatformBucket = /boss/.test(platform) ? 'boss'
+      : /liepin/.test(platform) ? 'liepin'
+        : /zhilian/.test(platform) ? 'zhilian'
+          : /51job|前程/.test(platform) ? '51job' : 'other'
+    void recordServerEvent(req.user.id, 'job_saved', {
+      source_platform: sourcePlatformBucket,
+      goal_linked: rows[0]?.career_goal_id ? 'true' : 'false',
+    }).catch(() => {})
+    void recordServerEvent(req.user.id, 'onboarding_step_completed', { step_id: 'job' }).catch(() => {})
     return success(res, { job: rows[0] })
   } catch (error) {
     return res.status(500).json({ detail: 'Unable to save job' })
