@@ -5,6 +5,8 @@
 
 const { dbAdmin } = require('../dbClient');
 const db = require('../lib/db');
+const DEFAULT_TEMPLATE_ID = 56;
+const MAX_TEMPLATE_ID = 60;
 
 function serializeResumeJson(resumeJson) {
   if (typeof resumeJson === 'object' && resumeJson !== null) {
@@ -13,12 +15,19 @@ function serializeResumeJson(resumeJson) {
   return resumeJson || '{}';
 }
 
+// API 的模板号限制在注册表的有效范围，缺失或越界时与前端采用相同默认款。
+function normalizeTemplateId(value) {
+  const id = Number(value);
+  return Number.isInteger(id) && id >= 1 && id <= MAX_TEMPLATE_ID ? id : DEFAULT_TEMPLATE_ID;
+}
+
 function buildResumePayload(body) {
   const { title, resume_json, template_id, score } = body || {};
   return {
     title: title || '未命名简历',
     resume_json: serializeResumeJson(resume_json),
-    template_id: template_id || 1,
+    // 有效模板 ID 原样持久化，缺失或无效值回退到与前端一致的默认款。
+    template_id: normalizeTemplateId(template_id),
     score: score || 0,
   };
 }
