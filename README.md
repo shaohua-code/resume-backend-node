@@ -193,10 +193,10 @@ npm start
 全新空数据库的结构权威脚本是 `database/init.sql`。**已有数据库不要重复执行初始化脚本。**升级既有库时先备份，并从后端目录执行这一份整合 SQL：
 
 ```bash
-psql -h 127.0.0.1 -U ai_resume -d ai_resume -v ON_ERROR_STOP=1 -f database/migrations/20260927_full_workspace_upgrade.sql
+# 已重建 database/migrations/20260927_full_workspace_upgrade.sql；它含基础表断言、事务与完成核验，但尚未在 PostgreSQL 演练，不要直接用于生产库。
 ```
 
-该增量脚本要求 `public.users` 与 `public.extension_saved_job` 已存在；包含目标与岗位进度、白名单行为事件、工作台引导表以及执行后核验。Docker 容器中可将文件挂载/复制到容器后通过 `psql -v ON_ERROR_STOP=1 -f` 执行；出现异常时事务整体回滚。原分项迁移文件保留作变更来源，请升级既有库时只执行整合文件，避免重复运行不同版本。仅在全新空库安装时使用 `init.sql`，并先在隔离数据库验证初始化顺序。
+业务增量脚本 `database/migrations/20260927_full_workspace_upgrade.sql` 已按当前 `init.sql` 和查询契约重建；它要求既有 `public.users`、`public.extension_saved_job` 结构，先备份并在隔离 PostgreSQL 演练，确认列、索引、外键和事务后再部署。IAM OIDC 新增表使用纯增量文件 `database/migrations/20260928_iam_oidc_sso.sql`，需备份并确认 `public.users` 已存在后单独演练。不要对旧库运行 `init.sql`。仅在全新空库安装时使用 `init.sql`，并先在隔离数据库验证初始化顺序。
 
 表结构中文对照见 [`database/TABLES.md`](database/TABLES.md)。
 
