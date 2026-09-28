@@ -5,6 +5,7 @@
 
 const express = require('express')
 const authRouter = require('./auth')
+const iamRouter = require('./iam')
 const aiRouter = require('./ai')
 const pdfRouter = require('./pdf')
 const resumeRouter = require('./resume')
@@ -21,6 +22,7 @@ const workspaceRouter = require('./workspace')
 
 const router = express.Router()
 
+router.use('/auth/iam', iamRouter)
 router.use('/auth', authRouter)
 router.use('/ai', aiRouter)
 router.use('/pdf', pdfRouter)

@@ -33,7 +33,7 @@ resume-backend-node/
 ├── validators/             # express-validator 参数校验规则
 ├── utils/                  # 响应封装、JSON 提取、权限、费用计算
 ├── database/
-│   ├── init.sql            # 全新安装权威建表脚本（33 张表）
+│   ├── init.sql            # 全新安装权威建表脚本（36 张表）
 │   ├── migrations/         # 既有数据库的一次性生产增量 SQL（需先备份并人工执行）
 │   └── TABLES.md           # 表结构中文对照
 └── data/uploads/           # 本地上传目录（开发默认，生产用 UPLOAD_DIR）
@@ -229,3 +229,11 @@ psql -h 127.0.0.1 -U ai_resume -d ai_resume -v ON_ERROR_STOP=1 -f database/migra
 - 随机账号注册在同一事务中初始化 ¥0 钱包；首次验证邮箱时再原子发放一次 `REGISTER_GIFT`，并同步写入用户与超管流水。
 
 提交代码前阅读 [`CONTRIBUTING.md`](CONTRIBUTING.md)。输入 `--提交` 时，项目的 `commit-ai-resume` Skill 会审查当前差异、运行必要验证，并按规范创建本地提交；不会自动推送。
+
+## IAM OIDC 服务端登录
+
+新增 routers/iam.js，并由 routers/index.js 挂载。接口：GET /api/auth/iam/config、POST /api/auth/iam/login/start、GET /api/auth/iam/callback、POST /api/auth/iam/exchange、POST /api/auth/iam/link/start、GET /api/auth/iam/link/status。服务端校验 Discovery issuer、PKCE S256、回调 iss、RS256 ID Token issuer/audience/nonce/at_hash 和 RFC 7662 access token 内省。state 在 HttpOnly cookie 与 5 分钟服务端记录双重绑定并单次消费；前端仅拿到 90 秒桥接码，数据库保存摘要。
+
+部署时服务端设置 IAM_ISSUER、IAM_CLIENT_ID、IAM_CLIENT_SECRET 与 IAM_REDIRECT_URI。密钥只从部署 Secret 管理注入，不能写进 Vue、日志或聊天。IAM 登记回调 URI 必须完全匹配；前后端使用同站点 HTTPS 以支持 SameSite=Lax 状态 Cookie。访问日志应脱敏回调查询参数 code、state、iss。
+
+既有数据库备份后人工执行 database/migrations/20260928_iam_oidc_sso.sql；新库由 database/init.sql 创建 iam_identity_links、iam_oidc_attempts、iam_login_codes 三表。中心 IAM permission code 与 data_scope 暂未接入；当前业务授权仍由本地 RBAC 和现有 admin_user_relation 决定。

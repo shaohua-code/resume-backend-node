@@ -55,6 +55,11 @@ const settings = {
     .map((s) => s.trim())
     .filter(Boolean),
 
+  // IAM confidential-client 配置只在 Node 服务端读取，不传到浏览器。
+  IAM_ISSUER: process.env.IAM_ISSUER || '',
+  IAM_CLIENT_ID: process.env.IAM_CLIENT_ID || '',
+  IAM_CLIENT_SECRET: process.env.IAM_CLIENT_SECRET || '',
+  IAM_REDIRECT_URI: process.env.IAM_REDIRECT_URI || '',
   APP_FRONTEND_URL: process.env.APP_FRONTEND_URL || process.env.FRONTEND_URL || 'http://localhost:5173',
 
   // 邮件内图片等资源的公网绝对 URL 前缀（默认可读 APP_PUBLIC_URL）

@@ -6,7 +6,7 @@
 --
 -- 【执行说明】
 -- 此文件不包含环境账号、地址或密码；请勿将全新安装脚本用于已有生产库。
--- 当前结构契约为 33 张表；既有数据库先执行适用的增量升级文件。
+-- 当前结构契约为 36 张表；既有数据库先执行基础增量升级，再执行适用的后续迁移。
 --
 -- 【后端 .env】
 -- DATABASE_URL=postgresql://<user>:<password>@<host>:5432/<database>
@@ -97,6 +97,37 @@ CREATE TABLE IF NOT EXISTS public.extension_auth_code (
 );
 CREATE INDEX IF NOT EXISTS idx_extension_auth_code_user ON public.extension_auth_code(user_id, expires_at DESC);
 
+-- IAM OIDC 绑定只记录不透明 subject；不按邮箱归并业务账号。
+CREATE TABLE IF NOT EXISTS public.iam_identity_links (
+  issuer TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (issuer, subject),
+  UNIQUE (issuer, user_id)
+);
+CREATE INDEX IF NOT EXISTS iam_identity_links_user_id_idx ON public.iam_identity_links(user_id);
+
+-- OIDC 回调状态保存于服务端并在回调时原子消费，有效期仅 5 分钟。
+CREATE TABLE IF NOT EXISTS public.iam_oidc_attempts (
+  state_hash CHAR(64) PRIMARY KEY,
+  nonce TEXT NOT NULL,
+  code_verifier TEXT NOT NULL,
+  intent TEXT NOT NULL CHECK (intent IN ('login', 'link')),
+  local_user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS iam_oidc_attempts_expires_at_idx ON public.iam_oidc_attempts(expires_at);
+
+-- 前端只能兑换短时单次码，数据库不保存最终返回的明文码。
+CREATE TABLE IF NOT EXISTS public.iam_login_codes (
+  code_hash CHAR(64) PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS iam_login_codes_expires_at_idx ON public.iam_login_codes(expires_at);
 CREATE TABLE IF NOT EXISTS public.extension_saved_job (
   id BIGSERIAL PRIMARY KEY,
   user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,

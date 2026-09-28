@@ -1,12 +1,12 @@
 # 数据库表中文对照
 
-全新安装以 [`init.sql`](init.sql) 为结构权威来源；当前共 **33 张表**。既有数据库升级统一执行 [`20260927_full_workspace_upgrade.sql`](migrations/20260927_full_workspace_upgrade.sql)，一次补齐求职进度/目标、留存事件与工作台引导状态。执行前备份并确认基础表存在；原分项迁移文件留作历史来源，不要与整合脚本重复执行。
+全新安装以 [`init.sql`](init.sql) 为结构权威来源；当前共 **36 张表**。既有数据库升级统一执行 [`20260927_full_workspace_upgrade.sql`](migrations/20260927_full_workspace_upgrade.sql)，一次补齐求职进度/目标、留存事件与工作台引导状态。执行前备份并确认基础表存在；原分项迁移文件留作历史来源，不要与整合脚本重复执行；IAM OIDC 既有库另执行 20260928_iam_oidc_sso.sql。
 
 验证表数量：
 
 ```sql
 SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
--- 预期：33
+-- 预期：36
 ```
 
 ---
@@ -41,7 +41,34 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | 核心字段 | `user_id`、`token_hash`、`session_version`、`expires_at` |
 | 关联 | `user_id` → `users.id`（CASCADE） |
 | 轮换规则 | refresh token 一次性原子消费；记录版本必须与 `users.session_version` 相同，否则拒绝轮换 |
-| 代码路径 | `lib/jwt.js` |
+| 代码路径 | lib/jwt.js |
+
+### iam_identity_links — IAM 身份绑定表
+
+| 项 | 说明 |
+|---|---|
+| 主键 | (issuer, subject) |
+| 核心字段 | user_id、created_at |
+| 约束 | 每个 issuer/subject 只能显式关联一个本地 UUID；每个本地账号在同一 issuer 下最多关联一个身份；不按邮箱自动合并 |
+| 代码路径 | routers/iam.js |
+
+### iam_oidc_attempts — OIDC 授权尝试表
+
+| 项 | 说明 |
+|---|---|
+| 主键 | state_hash |
+| 核心字段 | nonce、code_verifier、intent、local_user_id、expires_at |
+| 生命周期 | 5 分钟到期；回调以 state hash 原子删除后才兑换授权码，过期尝试由新登录请求清理 |
+| 代码路径 | routers/iam.js |
+
+### iam_login_codes — IAM 单次登录兑换码表
+
+| 项 | 说明 |
+|---|---|
+| 主键 | code_hash |
+| 核心字段 | user_id、created_at、expires_at |
+| 生命周期 | 90 秒有效；前端兑换时原子删除；数据库只存 SHA-256 摘要 |
+| 代码路径 | routers/iam.js |
 
 ---
 
@@ -309,7 +336,7 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 
 | 脚本 | 用途 |
 |---|---|
-| [`init.sql`](init.sql) | 全新安装结构权威来源（33 张表） |
+| [`init.sql`](init.sql) | 全新安装结构权威来源（36 张表） |
 | [`migrations/20260927_full_workspace_upgrade.sql`](migrations/20260927_full_workspace_upgrade.sql) | 既有数据库统一升级入口（目标/岗位进度、留存事件与工作台引导），Docker/PostgreSQL 人工执行 |
 | `migrations/20260926_career_goals.sql`、`20260927_retention_workspace.sql` | 原分项迁移来源，保留用于追溯；执行统一入口后不要再次单独运行 |
 
