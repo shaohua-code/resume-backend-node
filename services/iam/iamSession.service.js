@@ -96,6 +96,7 @@ async function getFreshIamAccessToken(userId, { issuer, getMetadata, postClientF
       String(tokenSet.token_type || '').toLowerCase() !== 'bearer'
       || !tokenSet.access_token
       || !tokenSet.refresh_token
+      || tokenSet.refresh_token === refreshToken
       || !Number.isInteger(expiresIn)
       || expiresIn < 1
       || expiresIn > 86_400
@@ -125,7 +126,13 @@ async function getFreshIamAccessToken(userId, { issuer, getMetadata, postClientF
     transactionOpen = false
     return { accessToken: tokenSet.access_token, subject: stored.subject, tenantId: stored.tenant_id }
   } catch {
-    if (transactionOpen) await client.query('ROLLBACK')
+    if (transactionOpen) {
+      try {
+        await client.query('ROLLBACK')
+      } catch {
+        // 回滚失败也不向调用层透传可能包含连接信息的底层错误。
+      }
+    }
     // 上游错误正文可能包含敏感协议细节；调用层只收到可处理的统一错误。
     const error = new Error('IAM 中央授权会话不可用')
     error.code = 'IAM_SESSION_UNAVAILABLE'
