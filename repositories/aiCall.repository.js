@@ -25,11 +25,15 @@ async function countAiCalls(builder) {
  * @param {number} params.from - 起始索引
  * @param {number} params.to - 结束索引
  * @param {string} [params.userId] - 按用户 ID 过滤
+ * @param {string[]} [params.matchingUserIds] - 按邮箱或昵称匹配的用户 ID
  * @param {string} [params.taskType] - 按任务类型过滤
+ * @param {boolean|null} [params.success] - 按调用成功/失败过滤
+ * @param {string|null} [params.createdFrom] - 创建时间下界（含）
+ * @param {string|null} [params.createdTo] - 创建时间上界（不含）
  * @param {string[]|null} [params.userIds] - 按用户 ID 列表过滤（归属过滤）；null 表示不过滤
  * @returns {Promise<Object>} PostgreSQL 查询结果 { data, error, count }
  */
-async function listAiCalls({ from, to, userId, taskType, userIds }) {
+async function listAiCalls({ from, to, userId, matchingUserIds, taskType, success, createdFrom, createdTo, userIds }) {
   let query = dbAdmin
     .from('ai_call_record')
     .select('*', { count: 'exact' })
@@ -46,7 +50,11 @@ async function listAiCalls({ from, to, userId, taskType, userIds }) {
   }
 
   if (userId) query = query.eq('user_id', userId);
+  if (matchingUserIds) query = query.in('user_id', matchingUserIds);
   if (taskType) query = query.eq('task_type', taskType);
+  if (success !== null && success !== undefined) query = query.eq('success', success);
+  if (createdFrom) query = query.gte('create_time', createdFrom);
+  if (createdTo) query = query.lt('create_time', createdTo);
 
   return query;
 }

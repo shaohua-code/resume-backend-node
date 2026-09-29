@@ -33,7 +33,7 @@ resume-backend-node/
 ├── validators/             # express-validator 参数校验规则
 ├── utils/                  # 响应封装、JSON 提取、权限、费用计算
 ├── database/
-│   ├── init.sql            # 全新安装权威建表脚本（36 张表）
+│   ├── init.sql            # 全新安装权威建表脚本（37 张表）
 │   ├── migrations/         # 既有数据库的一次性生产增量 SQL（需先备份并人工执行）
 │   └── TABLES.md           # 表结构中文对照
 └── data/uploads/           # 本地上传目录（开发默认，生产用 UPLOAD_DIR）
@@ -193,10 +193,10 @@ npm start
 全新空数据库的结构权威脚本是 `database/init.sql`。**已有数据库不要重复执行初始化脚本。**升级既有库时先备份，并从后端目录执行这一份整合 SQL：
 
 ```bash
-# 已重建 database/migrations/20260927_full_workspace_upgrade.sql；它含基础表断言、事务与完成核验，但尚未在 PostgreSQL 演练，不要直接用于生产库。
+# 当前工作区缺少 database/migrations/20260927_full_workspace_upgrade.sql；旧业务数据库不可按本段旧版说明直接升级。
 ```
 
-业务增量脚本 `database/migrations/20260927_full_workspace_upgrade.sql` 已按当前 `init.sql` 和查询契约重建；它要求既有 `public.users`、`public.extension_saved_job` 结构，先备份并在隔离 PostgreSQL 演练，确认列、索引、外键和事务后再部署。IAM OIDC 新增表使用纯增量文件 `database/migrations/20260928_iam_oidc_sso.sql`，需备份并确认 `public.users` 已存在后单独演练。不要对旧库运行 `init.sql`。仅在全新空库安装时使用 `init.sql`，并先在隔离数据库验证初始化顺序。
+当前项目工作区缺少文档引用的业务增量 `database/migrations/20260927_full_workspace_upgrade.sql`；应先依据目标库真实 schema 重建并审查，不可按该路径假设文件存在。IAM OIDC 纯新增迁移 `database/migrations/20260928_iam_oidc_sso.sql` 已补入，要求 `public.users.id` 为 UUID；先备份并在隔离 PostgreSQL 演练后再部署。不要对旧库运行 `init.sql`。仅在全新空库安装时使用 `init.sql`，并先在隔离数据库验证初始化顺序。
 
 表结构中文对照见 [`database/TABLES.md`](database/TABLES.md)。
 
@@ -232,8 +232,8 @@ npm start
 
 ## IAM OIDC 服务端登录
 
-新增 routers/iam.js，并由 routers/index.js 挂载。接口：GET /api/auth/iam/config、POST /api/auth/iam/login/start、GET /api/auth/iam/callback、POST /api/auth/iam/exchange、POST /api/auth/iam/link/start、GET /api/auth/iam/link/status。服务端校验 Discovery issuer、PKCE S256、回调 iss、RS256 ID Token issuer/audience/nonce/at_hash 和 RFC 7662 access token 内省。state 在 HttpOnly cookie 与 5 分钟服务端记录双重绑定并单次消费；前端仅拿到 90 秒桥接码，数据库保存摘要。
+新增 routers/iam.js，并由 routers/index.js 挂载。接口：GET /api/auth/iam/config、POST /api/auth/iam/login/start、GET /api/auth/iam/callback、POST /api/auth/iam/exchange、POST /api/auth/iam/link/start、GET /api/auth/iam/link/status。服务端校验 Discovery issuer、PKCE S256、回调 iss、RS256 ID Token issuer/audience/nonce/at_hash 和 RFC 7662 access token 内省；授权请求要求 `offline_access`。原始 IAM access/refresh token 只在 Node 服务处理，使用独立 `IAM_TOKEN_ENCRYPTION_KEY` 做 AES-GCM 加密保存在 `iam_oidc_sessions`；`services/iam/iamSession.service.js` 串行续期 refresh token，数据库解密失败或上游续期失败时按 fail closed 处理。state 在 HttpOnly cookie 与 5 分钟服务端记录双重绑定并单次消费；前端仅拿到 90 秒桥接码和本地会话，数据库保存桥接码摘要。
 
-部署时服务端设置 IAM_ISSUER、IAM_CLIENT_ID、IAM_CLIENT_SECRET 与 IAM_REDIRECT_URI。密钥只从部署 Secret 管理注入，不能写进 Vue、日志或聊天。IAM 登记回调 URI 必须完全匹配；前后端使用同站点 HTTPS 以支持 SameSite=Lax 状态 Cookie。访问日志应脱敏回调查询参数 code、state、iss。
+部署时服务端设置 IAM_ISSUER、IAM_CLIENT_ID、IAM_CLIENT_SECRET、IAM_REDIRECT_URI 与随机 32 字节以上的 `IAM_TOKEN_ENCRYPTION_KEY`。所有密钥只从部署 Secret 管理注入，不能写进 Vue、日志或聊天；更换令牌加密密钥后旧会话密文不能解密，需让用户重新通过 IAM 登录。IAM 登记回调 URI 必须完全匹配；前后端使用同站点 HTTPS 以支持 SameSite=Lax 状态 Cookie。访问日志应脱敏回调查询参数 code、state、iss。
 
-既有数据库备份后人工执行 database/migrations/20260928_iam_oidc_sso.sql；新库由 database/init.sql 创建 iam_identity_links、iam_oidc_attempts、iam_login_codes 三表。中心 IAM permission code 与 data_scope 暂未接入；当前业务授权仍由本地 RBAC 和现有 admin_user_relation 决定。
+既有数据库备份、确认 `public.users.id` 为 UUID 并在隔离库演练后，人工执行 `database/migrations/20260928_iam_oidc_sso.sql`；新库由 `database/init.sql` 创建 IAM 身份映射、授权尝试、单次登录码和加密会话四表。中央 permission check 尚未挂接业务路由，租户/组织列和 data_scope SQL 过滤也未接入；当前业务授权仍由本地 RBAC 和 `admin_user_relation` 决定。

@@ -58,6 +58,8 @@ const settings = {
   // IAM confidential-client 配置只在 Node 服务端读取，不传到浏览器。
   IAM_ISSUER: process.env.IAM_ISSUER || '',
   IAM_CLIENT_ID: process.env.IAM_CLIENT_ID || '',
+  // 专用密钥用于加密 IAM RP 令牌，避免与应用其他密文共享密钥。
+  IAM_TOKEN_ENCRYPTION_KEY: process.env.IAM_TOKEN_ENCRYPTION_KEY || '',
   IAM_CLIENT_SECRET: process.env.IAM_CLIENT_SECRET || '',
   IAM_REDIRECT_URI: process.env.IAM_REDIRECT_URI || '',
   APP_FRONTEND_URL: process.env.APP_FRONTEND_URL || process.env.FRONTEND_URL || 'http://localhost:5173',

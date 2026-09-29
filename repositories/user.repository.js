@@ -28,11 +28,12 @@ async function countUsers(builder) {
  * @param {string} [params.role] - 按角色过滤
  * @param {string} [params.status] - 按状态过滤
  * @param {string} [params.keyword] - 按邮箱或昵称模糊搜索
+ * @param {string} [params.userId] - 精确定位后台已授权范围内的单个用户
  * @param {string} params.adminRole - 当前管理员角色，用于数据范围控制
  * @param {string[]|null} [params.ownedUserIds] - 归属用户 ID 列表（普通管理员用）；null 表示不过滤
  * @returns {Promise<Object>} PostgreSQL 查询结果 { data, error, count }
  */
-async function listUsers({ from, to, role, status, keyword, adminRole, ownedUserIds }) {
+async function listUsers({ from, to, role, status, keyword, userId, adminRole, ownedUserIds }) {
   let query = dbAdmin
     .from('user_profile')
     .select('*', { count: 'exact' })
@@ -51,6 +52,8 @@ async function listUsers({ from, to, role, status, keyword, adminRole, ownedUser
 
   if (role) query = query.eq('role', role);
   if (status) query = query.eq('status', status);
+  // 支持后台从充值申请直接定位到指定账号，同时保留原有归属范围过滤。
+  if (userId) query = query.eq('user_id', userId);
   if (keyword) query = query.or(`email.ilike.%${keyword}%,nickname.ilike.%${keyword}%`);
 
   return query;

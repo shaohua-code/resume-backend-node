@@ -21,6 +21,8 @@ async function listLedgers(req, from, to) {
     from,
     to,
     userId: req.query.user_id,
+    // 允许从充值审核深链精确还原入账流水。
+    ledgerId: req.query.ledger_id,
     type: req.query.type,
     userIds: ownedUserIds,
   })

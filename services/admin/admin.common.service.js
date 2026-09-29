@@ -16,6 +16,56 @@ function sanitizeKeyword(keyword) {
 }
 
 /**
+ * 按昵称/邮箱查用户 ID，并限制在调用方已经计算好的归属用户集合内。
+ * @param {string} keyword - 用户输入的部分邮箱或昵称
+ * @param {string[]|null} userIds - 管理员可见用户；null 表示超管全局范围
+ * @returns {Promise<string[]|null>} 匹配用户 ID；null 表示无需添加用户过滤
+ */
+async function findUserIdsByKeyword(keyword, userIds) {
+  const safeKeyword = sanitizeKeyword(keyword).slice(0, 120)
+  if (!safeKeyword) return null
+  if (userIds !== null && !userIds.length) return []
+
+  const findProfiles = (field) => {
+    let query = dbAdmin.from('user_profile').select('user_id').ilike(field, `%${safeKeyword}%`)
+    if (userIds !== null) query = query.in('user_id', userIds)
+    return query
+  }
+  const [emails, nicknames] = await Promise.all([
+    findProfiles('email'),
+    findProfiles('nickname'),
+  ])
+  if (emails.error || nicknames.error) {
+    throw Object.assign(new Error('搜索用户信息失败'), { statusCode: 500 })
+  }
+  return [...new Set([...(emails.data || []), ...(nicknames.data || [])]
+    .map((profile) => profile.user_id)
+    .filter(Boolean))]
+}
+
+/**
+ * 验证后台列表使用的左闭右开日期区间，统一转换成 UTC ISO 字符串。
+ * @param {Object} query - Express 查询参数
+ * @returns {{ from: string|null, to: string|null }}
+ */
+function parseAdminDateRange(query) {
+  const parse = (value, label) => {
+    if (!value) return null
+    const date = new Date(value)
+    if (!Number.isFinite(date.getTime())) {
+      throw Object.assign(new Error(`${label}格式无效`), { statusCode: 400 })
+    }
+    return date.toISOString()
+  }
+  const from = parse(query.create_time_from, '开始时间')
+  const to = parse(query.create_time_to, '结束时间')
+  if (from && to && from >= to) {
+    throw Object.assign(new Error('结束时间必须晚于开始时间'), { statusCode: 400 })
+  }
+  return { from, to }
+}
+
+/**
  * 批量附加用户昵称与邮箱，供列表展示
  * @param {Array<Object>} items - 数据列表
  * @param {string} [userIdKey='user_id'] - 列表项中用户 ID 字段名
@@ -133,6 +183,8 @@ async function canAccessUser(user, targetUserId) {
 
 module.exports = {
   sanitizeKeyword,
+  findUserIdsByKeyword,
+  parseAdminDateRange,
   attachUserProfiles,
   logAdminAction,
   getOwnedUserIds,

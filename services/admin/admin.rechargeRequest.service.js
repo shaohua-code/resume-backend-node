@@ -16,7 +16,13 @@ const {
   resolveAbsoluteUrl,
 } = require('../../lib/emailTemplates')
 const { transferBalance } = require('../wallet/wallet.service')
-const { logAdminAction, attachUserProfiles } = require('./admin.common.service')
+const {
+  logAdminAction,
+  attachUserProfiles,
+  getOwnedUserIds,
+  findUserIdsByKeyword,
+  parseAdminDateRange,
+} = require('./admin.common.service')
 const {
   resolveAdminIdForUser,
   resolveRechargeInfoForUser,
@@ -189,13 +195,32 @@ async function listRequests(req, from, to) {
     .from('recharge_request')
     .select('*', { count: 'exact' })
     .order('create_time', { ascending: false })
-    .range(from, to)
 
   if (req.user.role !== ROLES.SUPER_ADMIN) {
     query = query.eq('admin_id', req.user.id)
   }
 
-  const { data, error, count } = await query
+  // 所有列表筛选都叠加在既有管理员归属条件之后，防止搜索扩大可见范围。
+  const status = String(req.query.status || '').trim()
+  if (status && !['PENDING', 'APPROVED'].includes(status)) {
+    throw Object.assign(new Error('充值记录状态无效'), { statusCode: 400 })
+  }
+  if (status) query = query.eq('status', status)
+  if (req.query.user_id) query = query.eq('user_id', String(req.query.user_id).trim())
+
+  const { from: createdFrom, to: createdTo } = parseAdminDateRange(req.query)
+  if (createdFrom) query = query.gte('create_time', createdFrom)
+  if (createdTo) query = query.lt('create_time', createdTo)
+
+  // 先按用户资料匹配 ID，并在普通管理员查询中同步限制归属用户集合。
+  if (req.query.keyword) {
+    const ownedUserIds = await getOwnedUserIds(req.user)
+    const matchingUserIds = await findUserIdsByKeyword(req.query.keyword, ownedUserIds)
+    if (matchingUserIds && !matchingUserIds.length) return { total: 0, items: [] }
+    if (matchingUserIds) query = query.in('user_id', matchingUserIds)
+  }
+
+  const { data, error, count } = await query.range(from, to)
   if (error) {
     throw Object.assign(new Error(`查询充值记录失败：${error.message}`), { statusCode: 500 })
   }

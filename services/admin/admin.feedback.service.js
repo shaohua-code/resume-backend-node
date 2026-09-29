@@ -4,7 +4,13 @@
  */
 
 const feedbackRepo = require('../../repositories/feedback.repository');
-const { attachUserProfiles, getOwnedUserIds, canAccessUser } = require('./admin.common.service');
+const {
+  attachUserProfiles,
+  getOwnedUserIds,
+  canAccessUser,
+  findUserIdsByKeyword,
+  parseAdminDateRange,
+} = require('./admin.common.service');
 
 /**
  * 分页查询用户反馈列表
@@ -15,7 +21,26 @@ const { attachUserProfiles, getOwnedUserIds, canAccessUser } = require('./admin.
  */
 async function listFeedbacks(req, from, to) {
   const userIds = await getOwnedUserIds(req.user);
-  const { data, error, count } = await feedbackRepo.listFeedbacks({ from, to, userIds });
+  // 用户与日期过滤在归属集合内执行，保持管理员与超管的既有数据边界。
+  const { from: createdFrom, to: createdTo } = parseAdminDateRange(req.query);
+  const matchingUserIds = await findUserIdsByKeyword(req.query.keyword, userIds);
+  if (matchingUserIds && !matchingUserIds.length) {
+    return {
+      items: [],
+      total: 0,
+      page: Number(req.query.page || '1'),
+      size: Number(req.query.size || '10'),
+    };
+  }
+  const { data, error, count } = await feedbackRepo.listFeedbacks({
+    from,
+    to,
+    userId: req.query.user_id,
+    matchingUserIds,
+    createdFrom,
+    createdTo,
+    userIds,
+  });
 
   if (error) {
     throw Object.assign(new Error(`查询失败：${error.message}`), { statusCode: 500 });

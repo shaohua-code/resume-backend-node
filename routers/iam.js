@@ -1,6 +1,6 @@
 /**
  * IAM OIDC 登录与本地账号显式绑定。
- * 该适配只确认中心身份；简历资源仍使用本地 UUID、角色与现有会话策略。
+ * 该适配确认中心身份并在服务端加密保管其授权凭证；业务权限与资源归属仍使用本地策略。
  */
 const express = require('express')
 const crypto = require('crypto')
@@ -11,6 +11,7 @@ const { settings } = require('../config')
 const { authRequired } = require('../middlewares/auth')
 const { issueTokenPair } = require('../lib/jwt')
 const { ensureUserProfile } = require('../services/user_profile_service')
+const { saveIamSession } = require('../services/iam/iamSession.service')
 const { authLimiter } = require('../middlewares/rateLimiter')
 
 const router = express.Router()
@@ -31,6 +32,8 @@ function isEnabled() {
     && settings.IAM_CLIENT_ID
     && settings.IAM_CLIENT_SECRET
     && settings.IAM_REDIRECT_URI
+    && settings.IAM_TOKEN_ENCRYPTION_KEY
+    && Buffer.byteLength(settings.IAM_TOKEN_ENCRYPTION_KEY, 'utf8') >= 32
     && process.env.JWT_SECRET
     && process.env.JWT_SECRET !== 'change-me-in-production'
   )
@@ -126,7 +129,7 @@ function clearAttemptCookie(res) {
   })
 }
 
-/** 创建带 S256 PKCE、state 和 nonce 的授权请求。 */
+/** 创建带 S256 PKCE、state、nonce 与服务端续期许可的授权请求。 */
 async function beginAuthorization(res, intent, localUserId = null) {
   const metadata = await getMetadata()
   const verifier = crypto.randomBytes(48).toString('base64url')
@@ -152,7 +155,7 @@ async function beginAuthorization(res, intent, localUserId = null) {
     response_type: 'code',
     client_id: settings.IAM_CLIENT_ID,
     redirect_uri: settings.IAM_REDIRECT_URI,
-    scope: 'openid profile email',
+    scope: 'openid profile email offline_access',
     state,
     nonce,
     code_challenge: challenge,
@@ -214,6 +217,7 @@ async function verifyAccessToken(token, metadata, subject) {
   ) {
     throw new Error('IAM access token 已失效或客户端归属不符')
   }
+  return { tenant_id: result.tenant_id }
 }
 
 /** 交换授权码并验证本次登录的 ID Token 与 access token。 */
@@ -233,12 +237,32 @@ async function completeAuthorization(code, attempt) {
     const expectedAtHash = crypto.createHash('sha256').update(token.access_token).digest().subarray(0, 16).toString('base64url')
     if (claims.at_hash !== expectedAtHash) throw new Error('IAM ID Token at_hash 与 access token 不匹配')
   }
-  await verifyAccessToken(token.access_token, metadata, claims.sub)
-  return { subject: claims.sub, issuer: getIssuer() }
+  if (
+    typeof token.refresh_token !== 'string'
+    || !token.refresh_token
+    || !Number.isInteger(Number(token.expires_in))
+    || Number(token.expires_in) < 1
+    || Number(token.expires_in) > 86_400
+  ) {
+    throw new Error('IAM 未签发可安全续期的 OIDC 会话')
+  }
+  if (typeof token.scope === 'string' && !token.scope.split(/\s+/).includes('offline_access')) {
+    throw new Error('IAM 未授予 offline_access')
+  }
+  const verified = await verifyAccessToken(token.access_token, metadata, claims.sub)
+  return {
+    identity: { subject: claims.sub, issuer: getIssuer() },
+    tokenSet: {
+      accessToken: token.access_token,
+      refreshToken: token.refresh_token,
+      accessExpiresAt: new Date(Date.now() + Number(token.expires_in) * 1000),
+      tenantId: verified.tenant_id,
+    },
+  }
 }
 
 /** 仅用本地用户 UUID 关联中心 subject；不按 email 自动合并任何账号。 */
-async function linkIdentity(localUserId, identity) {
+async function linkIdentity(localUserId, identity, tokenSet) {
   const client = await db.getPool().connect()
   try {
     await client.query('BEGIN')
@@ -251,6 +275,7 @@ async function linkIdentity(localUserId, identity) {
       'INSERT INTO public.iam_identity_links (issuer, subject, user_id) VALUES ($1, $2, $3)',
       [identity.issuer, identity.subject, localUserId],
     )
+    await saveIamSession(localUserId, identity, tokenSet, client)
     await client.query('COMMIT')
   } catch (error) {
     await client.query('ROLLBACK')
@@ -260,15 +285,26 @@ async function linkIdentity(localUserId, identity) {
   }
 }
 
-/** 生成短时单次兑换码；前端只会拿到该随机码，不会在 URL 中收到本地 JWT。 */
-async function createLoginCode(userId) {
+/** 生成短时单次兑换码；中心令牌只加密写入服务端，不出现在浏览器桥接响应中。 */
+async function createLoginCode(userId, identity, tokenSet) {
   const code = crypto.randomBytes(32).toString('base64url')
   const codeHash = crypto.createHash('sha256').update(code).digest('hex')
-  await db.query('DELETE FROM public.iam_login_codes WHERE expires_at <= now()')
-  await db.query(
-    'INSERT INTO public.iam_login_codes (code_hash, user_id, expires_at) VALUES ($1, $2, now() + interval \'90 seconds\')',
-    [codeHash, userId],
-  )
+  const client = await db.getPool().connect()
+  try {
+    await client.query('BEGIN')
+    await saveIamSession(userId, identity, tokenSet, client)
+    await client.query('DELETE FROM public.iam_login_codes WHERE expires_at <= now()')
+    await client.query(
+      'INSERT INTO public.iam_login_codes (code_hash, user_id, expires_at) VALUES ($1, $2, now() + interval \'90 seconds\')',
+      [codeHash, userId],
+    )
+    await client.query('COMMIT')
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+  }
   return code
 }
 
@@ -368,9 +404,9 @@ router.get('/callback', async (req, res) => {
       intent: stored.intent,
       localUserId: stored.local_user_id,
     }
-    const identity = await completeAuthorization(code, oidcAttempt)
+    const { identity, tokenSet } = await completeAuthorization(code, oidcAttempt)
     if (oidcAttempt.intent === 'link' && oidcAttempt.localUserId) {
-      await linkIdentity(oidcAttempt.localUserId, identity)
+      await linkIdentity(oidcAttempt.localUserId, identity, tokenSet)
       return res.redirect(frontend + '/user?tab=profile&iam_linked=1')
     }
     const { rows } = await db.query(
@@ -378,7 +414,7 @@ router.get('/callback', async (req, res) => {
       [identity.issuer, identity.subject],
     )
     if (!rows.length) return res.redirect(frontend + '/login?iam_error=identity_not_linked')
-    const loginCode = await createLoginCode(rows[0].user_id)
+    const loginCode = await createLoginCode(rows[0].user_id, identity, tokenSet)
     return res.redirect(frontend + '/login#iam_code=' + encodeURIComponent(loginCode))
   } catch {
     return fail()

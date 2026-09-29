@@ -28,6 +28,8 @@ async function listUsers(req, from, to) {
     role: req.query.role,
     status: req.query.status,
     keyword,
+    // 用户账号页支持来自充值/流水页的精确用户定位参数。
+    userId: req.query.user_id,
     adminRole: req.user.role,
     ownedUserIds,
   });

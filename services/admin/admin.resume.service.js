@@ -4,7 +4,7 @@
  */
 
 const resumeRepo = require('../../repositories/resume.repository');
-const { attachUserProfiles, getOwnedUserIds, canAccessUser } = require('./admin.common.service');
+const { attachUserProfiles, getOwnedUserIds, canAccessUser, sanitizeKeyword } = require('./admin.common.service');
 
 /**
  * 分页查询简历列表
@@ -20,6 +20,7 @@ async function listResumes(req, from, to) {
     from,
     to,
     userId: req.query.user_id,
+    keyword: sanitizeKeyword(req.query.keyword).slice(0, 120),
     userIds: ownedUserIds,
   })
 

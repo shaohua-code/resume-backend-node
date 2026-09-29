@@ -21,10 +21,14 @@ async function countFeedbacks() {
  * @param {Object} params - 查询参数
  * @param {number} params.from - 起始索引
  * @param {number} params.to - 结束索引
+ * @param {string} [params.userId] - 指定用户账号
+ * @param {string[]} [params.matchingUserIds] - 按邮箱或昵称匹配的用户 ID
+ * @param {string|null} [params.createdFrom] - 提交时间下界（含）
+ * @param {string|null} [params.createdTo] - 提交时间上界（不含）
  * @param {string[]|null} [params.userIds] - 归属用户；null 表示超管不过滤
  * @returns {Promise<Object>} PostgreSQL 查询结果 { data, error, count }
  */
-async function listFeedbacks({ from, to, userIds }) {
+async function listFeedbacks({ from, to, userId, matchingUserIds, createdFrom, createdTo, userIds }) {
   let query = dbAdmin
     .from('user_feedback')
     .select('*', { count: 'exact' })
@@ -39,6 +43,12 @@ async function listFeedbacks({ from, to, userIds }) {
       query = query.in('user_id', userIds);
     }
   }
+
+  // 附加业务筛选时仍保留上方的管理员归属条件。
+  if (userId) query = query.eq('user_id', userId);
+  if (matchingUserIds) query = query.in('user_id', matchingUserIds);
+  if (createdFrom) query = query.gte('create_time', createdFrom);
+  if (createdTo) query = query.lt('create_time', createdTo);
 
   return query;
 }

@@ -6,7 +6,7 @@
 --
 -- 【执行说明】
 -- 此文件不包含环境账号、地址或密码；请勿将全新安装脚本用于已有生产库。
--- 当前结构契约为 36 张表；既有数据库先执行基础增量升级，再执行适用的后续迁移。
+-- 当前结构契约为 37 张表；既有数据库只能执行与真实基础 schema 匹配且已审查的增量脚本。
 --
 -- 【后端 .env】
 -- DATABASE_URL=postgresql://<user>:<password>@<host>:5432/<database>
@@ -108,6 +108,23 @@ CREATE TABLE IF NOT EXISTS public.iam_identity_links (
 );
 CREATE INDEX IF NOT EXISTS iam_identity_links_user_id_idx ON public.iam_identity_links(user_id);
 
+-- 中心 access/refresh token 使用 AES-256-GCM 密文保存，并随身份解绑级联清除。
+CREATE TABLE IF NOT EXISTS public.iam_oidc_sessions (
+  issuer TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  tenant_id TEXT NOT NULL,
+  access_token_ciphertext TEXT NOT NULL,
+  refresh_token_ciphertext TEXT NOT NULL,
+  access_expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (issuer, subject),
+  FOREIGN KEY (issuer, subject)
+    REFERENCES public.iam_identity_links(issuer, subject) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS iam_oidc_sessions_expiry_idx
+  ON public.iam_oidc_sessions(access_expires_at);
+
 -- OIDC 回调状态保存于服务端并在回调时原子消费，有效期仅 5 分钟。
 CREATE TABLE IF NOT EXISTS public.iam_oidc_attempts (
   state_hash CHAR(64) PRIMARY KEY,
@@ -120,7 +137,7 @@ CREATE TABLE IF NOT EXISTS public.iam_oidc_attempts (
 );
 CREATE INDEX IF NOT EXISTS iam_oidc_attempts_expires_at_idx ON public.iam_oidc_attempts(expires_at);
 
--- 前端只能兑换短时单次码，数据库不保存最终返回的明文码。
+-- 浏览器只能兑换短时单次码，IAM token pair 由后端单独以密文保管。
 CREATE TABLE IF NOT EXISTS public.iam_login_codes (
   code_hash CHAR(64) PRIMARY KEY,
   user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,

@@ -62,7 +62,7 @@ async function listLedgerByUser(userId, from, to) {
  * 分页查询流水（支持多用户、类型筛选）
  * @param {Object} params
  */
-async function listLedger({ from, to, userId, type, userIds }) {
+async function listLedger({ from, to, userId, ledgerId, type, userIds }) {
   let query = dbAdmin
     .from('balance_ledger')
     .select('*', { count: 'exact' })
@@ -78,6 +78,8 @@ async function listLedger({ from, to, userId, type, userIds }) {
   }
 
   if (userId) query = query.eq('user_id', userId)
+  // 充值记录保存的流水主键可直接定位到本次入账，且仍叠加当前管理员的用户范围。
+  if (ledgerId) query = query.eq('id', ledgerId)
   if (type) query = query.eq('type', type)
 
   return query

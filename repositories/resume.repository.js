@@ -233,7 +233,7 @@ async function findOldestByUser(userId) {
     .single();
 }
 
-async function listAdmin({ from, to, userId, userIds }) {
+async function listAdmin({ from, to, userId, userIds, keyword }) {
   let query = dbAdmin
     .from('resume')
     .select('id,user_id,title,template_id,score,create_time,update_time', { count: 'exact' })
@@ -250,6 +250,8 @@ async function listAdmin({ from, to, userId, userIds }) {
   }
 
   if (userId) query = query.eq('user_id', userId)
+  // 简历标题筛选与精确用户筛选、管理员归属范围同时生效。
+  if (keyword) query = query.ilike('title', `%${keyword}%`)
   return query
 }
 
