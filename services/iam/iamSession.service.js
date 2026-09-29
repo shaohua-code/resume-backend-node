@@ -65,13 +65,13 @@ async function getFreshIamAccessToken(userId, { issuer, getMetadata, postClientF
     await client.query('BEGIN')
     transactionOpen = true
     const { rows } = await client.query(
-      `SELECT session.subject, session.tenant_id, session.access_token_ciphertext,
-              session.refresh_token_ciphertext, session.access_expires_at
-       FROM public.iam_oidc_sessions AS session
+      `SELECT iam_session.subject, iam_session.tenant_id, iam_session.access_token_ciphertext,
+              iam_session.refresh_token_ciphertext, iam_session.access_expires_at
+       FROM public.iam_oidc_sessions AS iam_session
        JOIN public.iam_identity_links AS link
-         ON link.issuer = session.issuer AND link.subject = session.subject
-       WHERE link.user_id = $1 AND session.issuer = $2
-       FOR UPDATE OF session`,
+         ON link.issuer = iam_session.issuer AND link.subject = iam_session.subject
+       WHERE link.user_id = $1 AND iam_session.issuer = $2
+       FOR UPDATE OF iam_session`,
       [userId, issuer],
     )
     if (!rows.length) throw new Error('IAM 身份尚未绑定')
