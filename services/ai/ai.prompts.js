@@ -453,6 +453,20 @@ const SCORE_PROMPT = composePrompt(
 仅输出纯JSON对象，字段严格为content_completeness、skill_match、project_quality、resume_structure、format_quality、total，均为整数。`,
 )
 
+// 面试题仅生成练习材料；提示词把用户简历和岗位内容视为数据而非指令。
+const INTERVIEW_QUESTIONS_PROMPT = composePrompt(
+  COMMON_INPUT_BOUNDARY,
+  `## 简历事实\n<resume_json>\n{resume_json}\n</resume_json>\n## 目标岗位\n<target_position>\n{target_position}\n</target_position>\n## 岗位描述\n<job_description>\n{jd_text}\n</job_description>\n## 题目侧重\n<categories>\n{categories}\n</categories>\n## 题量\n{question_count}\n## 历史题目（仅用于避免重复）\n<avoid_questions>\n{avoid_questions}\n</avoid_questions>`,
+  `## 生成要求\n严格依据简历中真实出现的事实和岗位要求提问；简历未提供的信息只能作为澄清问题，禁止把它写成用户已有能力或成果。根据题目侧重覆盖专业能力、项目深挖、行为面试、岗位缺口和反问面试官；历史题目应改换考察角度。回答思路只提示组织答案，不代写虚构事实。`,
+)
+
+// 点评只衡量回答对题目的覆盖与证据表达，不把主观判断包装成客观标准答案。
+const INTERVIEW_ANSWER_REVIEW_PROMPT = composePrompt(
+  COMMON_INPUT_BOUNDARY,
+  `## 面试题\n<question>{question}</question>\n## 考察点\n<evaluation_focus>{evaluation_focus}</evaluation_focus>\n## 岗位要求\n<job_description>{jd_text}</job_description>\n## 简历可验证证据\n<resume_evidence>{resume_evidence}</resume_evidence>\n## 用户回答（原文）\n<answer>{answer}</answer>`,
+  `## 点评要求\n只评价回答是否回应问题、是否有可验证的证据、结构是否清楚、表达是否具体。不得擅自把简历没写的经历视为事实；指出无证据陈述但不要直接判定用户撒谎。岗位或简历资料不足时明确标记“证据不足”。建议只说明可补充的真实信息，不代写虚构经历。`,
+)
+
 const SCORE_STREAM_PROMPT = composePrompt(
   COMMON_RECRUITMENT_ROLES,
   COMMON_JOB_AND_STAGE_RULES,
@@ -589,6 +603,9 @@ function format(tpl, vars) {
  * 不含输出格式、字段名、optimization_notes 等程序契约（由代码锁定，用户不可改）。
  */
 const CODE_DEFAULT_INSTRUCTIONS = {
+  interview_questions: `根据用户真实简历与目标岗位生成可用于练习的面试问题。只围绕输入中真实出现的经历、能力与岗位要求追问；缺少证据时提出澄清问题，不得虚构项目、职责、技能或成果。问题应具体、可回答并避免重复，覆盖用户指定类别。关联经历使用简短原文事实。`,
+  // 管理端仅可调整业务指导，机器输出字段仍由 ai.promptResolve.js 锁定。
+  interview_answer_review: `对照面试题、岗位要求、简历证据与用户原回答，指出回答覆盖情况、证据强弱、结构表达、可能缺少的真实细节，并给出可执行建议。意见是练习参考，不宣称客观判定回答真伪。`,
   resume_generate: `根据用户填写信息生成完整、可投递的简历。
 1. 有较完整经历时：保留真实姓名、联系方式、公司、学校等事实，逐项优化评价、技能与各段经历，确保相对原文有实质提升。
 2. 仅有姓名+意向岗位等极少信息时：围绕岗位生成可编辑的示意性评价、技能与经历，并提醒用户按真实经历修改后再投递。
@@ -647,6 +664,8 @@ module.exports = {
   OPTIMIZE_WORK_EXPERIENCE_PROMPT,
   JD_MATCH_PROMPT,
   SCORE_PROMPT,
+  INTERVIEW_QUESTIONS_PROMPT,
+  INTERVIEW_ANSWER_REVIEW_PROMPT,
   SCORE_STREAM_PROMPT,
   PDF_OPTIMIZE_PROMPT,
   JD_RESUME_OPTIMIZE_PROMPT,

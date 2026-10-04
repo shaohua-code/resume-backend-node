@@ -23,6 +23,9 @@ const AI_TASK = {
   WORK_EXPERIENCE_OPTIMIZE: 'work_experience_optimize',
   JD_MATCH: 'jd_match',
   SCORE: 'score',
+  INTERVIEW_QUESTIONS: 'interview_questions',
+  // 回答点评采用独立任务映射，便于分别配置模型、提示词与成本审计。
+  INTERVIEW_ANSWER_REVIEW: 'interview_answer_review',
   PDF_OPTIMIZE: 'pdf_optimize',
   JD_RESUME_OPTIMIZE: 'jd_resume_optimize',
   JD_IMAGE_EXTRACT: 'jd_image_extract',
@@ -39,6 +42,9 @@ const AI_TASK_CATALOG = [
   { task_type: AI_TASK.WORK_EXPERIENCE_OPTIMIZE, name: '工作经历优化', required_model_type: AI_MODEL_TYPE.TEXT },
   { task_type: AI_TASK.JD_MATCH, name: '岗位匹配度分析', required_model_type: AI_MODEL_TYPE.TEXT },
   { task_type: AI_TASK.SCORE, name: '简历评分', required_model_type: AI_MODEL_TYPE.TEXT },
+  { task_type: AI_TASK.INTERVIEW_QUESTIONS, name: 'AI 面试题生成', required_model_type: AI_MODEL_TYPE.TEXT },
+  // 面试回答点评与题目生成分开计量，且输出结构由代码侧锁定。
+  { task_type: AI_TASK.INTERVIEW_ANSWER_REVIEW, name: 'AI 面试回答点评', required_model_type: AI_MODEL_TYPE.TEXT },
   { task_type: AI_TASK.PDF_OPTIMIZE, name: 'PDF 简历优化', required_model_type: AI_MODEL_TYPE.TEXT },
   { task_type: AI_TASK.JD_RESUME_OPTIMIZE, name: 'JD 简历优化', required_model_type: AI_MODEL_TYPE.TEXT },
   { task_type: AI_TASK.PDF_JD_OPTIMIZE, name: 'PDF + 岗位优化', required_model_type: AI_MODEL_TYPE.TEXT },

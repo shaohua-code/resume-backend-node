@@ -6,7 +6,7 @@
 --
 -- 【执行说明】
 -- 此文件不包含环境账号、地址或密码；请勿将全新安装脚本用于已有生产库。
--- 当前结构契约为 37 张表；既有数据库只能执行与真实基础 schema 匹配且已审查的增量脚本。
+-- 当前结构契约为 42 张表；既有数据库只能执行与真实基础 schema 匹配且已审查的增量脚本。
 --
 -- 【后端 .env】
 -- DATABASE_URL=postgresql://<user>:<password>@<host>:5432/<database>
@@ -413,6 +413,117 @@ CREATE TABLE IF NOT EXISTS public.ai_call_record (
 );
 CREATE INDEX IF NOT EXISTS idx_ai_call_record_user_task_time ON public.ai_call_record(user_id, task_type, create_time);
 
+-- 套题、题目与个人练习分别保存，复合外键阻止跨用户拼接子资源。
+CREATE TABLE IF NOT EXISTS public.interview_question_set (
+  id BIGSERIAL PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  resume_id BIGINT REFERENCES public.resume(id) ON DELETE SET NULL,
+  career_goal_id BIGINT,
+  saved_job_id BIGINT,
+  target_position TEXT NOT NULL DEFAULT '',
+  jd_snapshot TEXT NOT NULL DEFAULT '',
+  resume_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+  question_count INT NOT NULL DEFAULT 0,
+  generation_status TEXT NOT NULL DEFAULT 'generating' CHECK (generation_status IN ('generating', 'completed', 'failed')),
+  request_key UUID NOT NULL,
+  ai_call_id BIGINT REFERENCES public.ai_call_record(id) ON DELETE SET NULL,
+  create_time TIMESTAMPTZ NOT NULL DEFAULT now(),
+  update_time TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (id, user_id),
+  UNIQUE (user_id, request_key)
+);
+CREATE INDEX IF NOT EXISTS idx_interview_question_set_user_time
+  ON public.interview_question_set(user_id, create_time DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_interview_question_set_status_time
+  ON public.interview_question_set(generation_status, create_time DESC);
+
+CREATE TABLE IF NOT EXISTS public.interview_question (
+  id BIGSERIAL PRIMARY KEY,
+  set_id BIGINT NOT NULL,
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  category TEXT NOT NULL DEFAULT 'professional' CHECK (category IN ('professional', 'project', 'behavioral', 'gap', 'reverse')),
+  question TEXT NOT NULL,
+  evaluation_focus TEXT NOT NULL DEFAULT '',
+  resume_evidence TEXT NOT NULL DEFAULT '',
+  answer_guidance TEXT NOT NULL DEFAULT '',
+  sort_order INT NOT NULL DEFAULT 0,
+  create_time TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (id, set_id, user_id),
+  FOREIGN KEY (set_id, user_id) REFERENCES public.interview_question_set(id, user_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_interview_question_set_order
+  ON public.interview_question(set_id, user_id, sort_order, id);
+-- 异步流入的题目按套题顺序幂等更新，避免刷新/重连产生重复题目。
+CREATE UNIQUE INDEX IF NOT EXISTS uq_interview_question_set_order
+  ON public.interview_question(set_id, user_id, sort_order);
+
+CREATE TABLE IF NOT EXISTS public.interview_practice (
+  id BIGSERIAL PRIMARY KEY,
+  question_id BIGINT NOT NULL,
+  set_id BIGINT NOT NULL,
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'todo' CHECK (status IN ('todo', 'practiced', 'mastered')),
+  answer_draft TEXT NOT NULL DEFAULT '',
+  reflection TEXT NOT NULL DEFAULT '',
+  last_practiced_at TIMESTAMPTZ,
+  update_time TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (question_id, user_id),
+  FOREIGN KEY (set_id, user_id) REFERENCES public.interview_question_set(id, user_id) ON DELETE CASCADE,
+  FOREIGN KEY (question_id, set_id, user_id) REFERENCES public.interview_question(id, set_id, user_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_interview_practice_user_status
+  ON public.interview_practice(user_id, status, update_time DESC);
+
+-- 后台生成任务保存可恢复进度；唯一活动索引阻止单用户并发生成第二套。
+CREATE TABLE IF NOT EXISTS public.interview_question_generation_job (
+  id BIGSERIAL PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  set_id BIGINT NOT NULL UNIQUE,
+  request_key UUID NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'completed', 'failed')),
+  stage TEXT NOT NULL DEFAULT 'preparing' CHECK (stage IN ('preparing', 'quota_check', 'connecting', 'model', 'generating', 'validating', 'saving', 'completed', 'failed')),
+  status_message TEXT NOT NULL DEFAULT '已加入后台生成队列',
+  generated_count INT NOT NULL DEFAULT 0 CHECK (generated_count >= 0),
+  total_count INT NOT NULL CHECK (total_count IN (10, 20, 30)),
+  request_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  error_message TEXT,
+  ai_call_id BIGINT REFERENCES public.ai_call_record(id) ON DELETE SET NULL,
+  attempt_started_at TIMESTAMPTZ,
+  heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ,
+  create_time TIMESTAMPTZ NOT NULL DEFAULT now(),
+  update_time TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, request_key),
+  FOREIGN KEY (set_id, user_id) REFERENCES public.interview_question_set(id, user_id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_interview_question_active_job_user
+  ON public.interview_question_generation_job(user_id) WHERE status IN ('queued', 'running');
+CREATE INDEX IF NOT EXISTS idx_interview_question_generation_job_queue
+  ON public.interview_question_generation_job(status, create_time, id);
+CREATE INDEX IF NOT EXISTS idx_interview_question_generation_job_user_time
+  ON public.interview_question_generation_job(user_id, create_time DESC, id DESC);
+
+-- 回答点评只保存本人的回答快照与 AI 版本；管理题库查询不读取该表。
+CREATE TABLE IF NOT EXISTS public.interview_answer_review (
+  id BIGSERIAL PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  set_id BIGINT NOT NULL,
+  question_id BIGINT NOT NULL,
+  review_version INT NOT NULL CHECK (review_version > 0),
+  answer_snapshot TEXT NOT NULL,
+  review_result JSONB,
+  review_status TEXT NOT NULL DEFAULT 'pending' CHECK (review_status IN ('pending', 'completed', 'failed')),
+  error_message TEXT,
+  ai_call_id BIGINT REFERENCES public.ai_call_record(id) ON DELETE SET NULL,
+  create_time TIMESTAMPTZ NOT NULL DEFAULT now(),
+  update_time TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (question_id, user_id, review_version),
+  FOREIGN KEY (set_id, user_id) REFERENCES public.interview_question_set(id, user_id) ON DELETE CASCADE,
+  FOREIGN KEY (question_id, set_id, user_id) REFERENCES public.interview_question(id, set_id, user_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_interview_answer_review_user_question
+  ON public.interview_answer_review(user_id, set_id, question_id, review_version DESC);
+
 CREATE TABLE IF NOT EXISTS public.ai_model (
   id                       BIGSERIAL PRIMARY KEY,
   name                     TEXT NOT NULL,
@@ -685,7 +796,7 @@ CREATE TABLE IF NOT EXISTS public.user_ai_task_prompt (
 CREATE INDEX IF NOT EXISTS idx_user_ai_task_prompt_user ON public.user_ai_task_prompt(user_id);
 
 -- 管理员默认业务提示词（与 services/ai/ai.prompts.js CODE_DEFAULT_INSTRUCTIONS 对齐；可重复执行）
--- 完整独立脚本见 database/seed_ai_task_prompt.sql
+-- 新增任务的提示词种子与本文件保持同步，默认内容受后端代码约束。
 INSERT INTO public.ai_task_prompt (task_type, instruction, create_time, update_time)
 VALUES
   (
@@ -751,6 +862,16 @@ VALUES
     $prompt$按通用评分口径为简历打分。
 1. 综合完整度、技能相关性、经历证据、结构与文本规范。
 2. 不因敏感信息缺失或关键词堆砌加减分。$prompt$,
+    now(), now()
+  ),
+  (
+    'interview_questions',
+    $prompt$根据用户真实简历与目标岗位生成可用于练习的面试问题。只围绕输入中真实出现的经历、能力与岗位要求追问；缺少证据时提出澄清问题，不得虚构项目、职责、技能或成果。问题应具体、可回答并避免重复，覆盖用户指定类别。关联经历使用简短原文事实。$prompt$,
+    now(), now()
+  ),
+  (
+    'interview_answer_review',
+    $prompt$对照题目、岗位要求、简历证据与用户原回答，指出回答覆盖、证据强弱、结构表达和可补充的真实细节。点评是练习参考，不宣称客观判定答案真伪。$prompt$,
     now(), now()
   ),
   (
@@ -821,6 +942,8 @@ FROM (VALUES
   ('work_experience_optimize', 'text', 'deepseek-v4-flash'),
   ('jd_match', 'text', 'deepseek-v4-flash'),
   ('score', 'text', 'deepseek-v4-flash'),
+  ('interview_questions', 'text', 'deepseek-v4-flash'),
+  ('interview_answer_review', 'text', 'deepseek-v4-flash'),
   ('pdf_optimize', 'text', 'deepseek-v4-flash'),
   ('jd_resume_optimize', 'text', 'deepseek-v4-flash'),
   ('pdf_jd_optimize', 'text', 'deepseek-v4-flash'),

@@ -1,12 +1,12 @@
 # 数据库表中文对照
 
-全新安装以 [`init.sql`](init.sql) 为结构权威来源；当前共 **37 张表**。当前项目工作区缺少文档引用的既有库业务升级 `20260927_full_workspace_upgrade.sql`，在该脚本按目标 schema 补回并隔离验证前，不得据此升级旧业务库。IAM OIDC 既有库增量 [`20260928_iam_oidc_sso.sql`](migrations/20260928_iam_oidc_sso.sql) 已补入，执行前需备份、确认 `users.id` 为 UUID 并隔离演练；本迁移未在 PostgreSQL 执行。
+全新安装以 [`init.sql`](init.sql) 为结构权威来源；当前共 **42 张表**。题库一次性升级入口为 [`20261002_interview_question_bank_complete.sql`](migrations/20261002_interview_question_bank_complete.sql)，包含套题、题目、练习、异步生成任务和回答点评共 5 张表，并会同步任务模型与提示词。已于 2026-10-02 在本地 `ai_resume` 执行成功，核验 5 张题库表及两项任务模型/提示词配置；脚本还包含基础表检查、重复数据预检和事务保护。当前工作区缺少既有业务升级 `20260927_full_workspace_upgrade.sql`，不得据旧文档升级其他业务 schema。IAM OIDC 既有库增量 [`20260928_iam_oidc_sso.sql`](migrations/20260928_iam_oidc_sso.sql) 尚未在隔离 PostgreSQL 演练。
 
 验证表数量：
 
 ```sql
 SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
--- 预期：37
+-- 预期：42
 ```
 
 ---
@@ -196,7 +196,7 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | 主键 | `id` (BIGSERIAL) |
 | 核心字段 | `task_type`（唯一）、`instruction` |
 | 说明 | 仅业务指令；JSON Schema/输出格式永不入库，由代码锁定追加 |
-| 种子数据 | `init.sql` 与 `seed_ai_task_prompt.sql` 按 `CODE_DEFAULT_INSTRUCTIONS` 幂等写入 |
+| 种子数据 | `init.sql` 按 `CODE_DEFAULT_INSTRUCTIONS` 幂等写入；面试题库迁移同步新增任务默认提示词 |
 | 代码路径 | `services/user/userAiConfig.service.js`、`services/ai/ai.promptResolve.js` |
 
 ### user_ai_task_prompt — 用户业务提示词覆盖
@@ -208,6 +208,56 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | 关联 | `user_id` → `users.id`（CASCADE） |
 | 说明 | 需 `user_ai_prompt_customization.enabled=true`；回退管理员 → 代码默认 |
 | 代码路径 | `services/user/userAiConfig.service.js`、`services/ai/ai.promptResolve.js` |
+
+### interview_question_set — 面试题套题
+
+| 项 | 说明 |
+|---|---|
+| 主键 | `id` (BIGSERIAL) |
+| 核心字段 | `user_id`、`resume_id`、岗位/JD/简历摘要快照、题数、生成状态、用户级 `request_key`、`ai_call_id` |
+| 约束 | `(user_id, request_key)` 幂等唯一；`(id,user_id)` 为题目和练习记录复合外键目标；简历删除时仅清空引用、不删除套题快照 |
+| 关联 | `user_id` → `users.id`（CASCADE）；`resume_id` → `resume.id`（SET NULL）；`ai_call_id` → `ai_call_record.id`（SET NULL） |
+| 代码路径 | `repositories/interviewQuestion.repository.js`、`services/interview/interviewQuestion.service.js` |
+
+### interview_question — 面试题
+
+| 项 | 说明 |
+|---|---|
+| 主键 | `id` (BIGSERIAL) |
+| 核心字段 | `set_id`、`user_id`、类别、问题、考察点、简历证据、回答思路、排序 |
+| 约束 | `(id,set_id,user_id)` 唯一；复合外键保证题目只能属于同用户的套题 |
+| 关联 | `(set_id,user_id)` → `interview_question_set(id,user_id)`（CASCADE） |
+| 代码路径 | `repositories/interviewQuestion.repository.js` |
+
+### interview_practice — 面试练习记录
+
+| 项 | 说明 |
+|---|---|
+| 主键 | `id` (BIGSERIAL) |
+| 核心字段 | `question_id`、`set_id`、`user_id`、状态、回答草稿、复盘、最近练习时间 |
+| 约束 | 每用户每题唯一；复合外键同时验证题目、套题和用户归属 |
+| 关联 | 套题、题目和用户删除时级联删除 |
+| 代码路径 | `repositories/interviewQuestion.repository.js` |
+
+### interview_question_generation_job — 面试题异步生成任务
+
+| 项 | 说明 |
+|---|---|
+| 主键 | `id` (BIGSERIAL) |
+| 核心字段 | `user_id`、`set_id`、阶段、状态、生成数量、总数、心跳、错误信息 |
+| 约束 | 用户级唯一活动任务索引，避免同一用户并行启动第二套；题序支持断线重连后的幂等保存 |
+| 隔离 | 任务查询和更新必须同时校验当前 `user_id`；`request_payload` 在终态清理简历/JD 快照 |
+| 代码路径 | `services/interview/interviewQuestion.worker.js`、`repositories/interviewQuestion.repository.js` |
+
+### interview_answer_review — 面试回答 AI 点评历史
+
+| 项 | 说明 |
+|---|---|
+| 主键 | `id` (BIGSERIAL) |
+| 核心字段 | `user_id`、`question_id`、回答快照、点评 JSON、点评版本与状态 |
+| 约束 | 每题每用户按点评版本唯一；复合外键验证套题、问题和用户归属 |
+| 隔离 | 用户仅查看自己的回答快照和点评；超级管理员题库概览不返回此表数据 |
+| 代码路径 | `services/interview/interviewAnswerReview.service.js` |
 
 ---
 
@@ -346,7 +396,8 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 
 | 脚本 | 用途 |
 |---|---|
-| [`init.sql`](init.sql) | 全新安装结构权威来源（37 张表） |
+| [`init.sql`](init.sql) | 全新安装结构权威来源（42 张表） |
+| [`migrations/20261002_interview_question_bank_complete.sql`](migrations/20261002_interview_question_bank_complete.sql) | 面试题库单文件升级入口（5 张表及 AI 任务配置）；本地 ai_resume 已执行并验证 |
 | `migrations/20260927_full_workspace_upgrade.sql` | 当前工作区缺失；重建并按目标 schema 隔离验证前禁止对既有数据库升级 |
 | [`migrations/20260928_iam_oidc_sso.sql`](migrations/20260928_iam_oidc_sso.sql) | IAM 身份/尝试/桥接码/加密 session 纯新增表；人工执行，未在 PostgreSQL 演练 |
 | `migrations/20260926_career_goals.sql`、`20260927_retention_workspace.sql` | 原分项迁移来源，保留用于追溯；执行统一入口后不要再次单独运行 |

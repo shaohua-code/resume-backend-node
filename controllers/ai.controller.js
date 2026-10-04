@@ -8,6 +8,8 @@ const resumeRepo = require('../repositories/resume.repository');
 const { ensureAiQuota, recordAiCall } = require('../services/ai/ai.quota.service');
 const { success, error, sanitizePublicError } = require('../utils/response');
 const multer = require('multer');
+const interviewQuestionRepo = require('../repositories/interviewQuestion.repository');
+const interviewQuestionService = require('../services/interview/interviewQuestion.service');
 
 // JD 图片 OCR：内存存储，不落盘
 const jdImageUpload = multer({
@@ -34,6 +36,8 @@ function setupSSE(res) {
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
+  // 关闭反向代理缓冲，否则完整题目可能被攒到生成结束才显示。
+  res.setHeader('X-Accel-Buffering', 'no');
   if (typeof res.flushHeaders === 'function') res.flushHeaders();
   return (payload) => res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
@@ -70,6 +74,16 @@ function respondAiError(res, e, { sendEvent, recordFn } = {}) {
       return res.end();
     }
     return error(res, e.statusCode || 400, e.message, { code: e.code });
+  }
+
+  // 上游模型网络故障与内部程序错误分开提示，帮助用户按后台任务模型配置定位问题。
+  if (['ECONNRESET', 'ECONNABORTED', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND', 'ECONNREFUSED'].includes(e.code)) {
+    const message = 'AI 模型服务连接中断或响应超时，请检查后台任务模型的 API 地址、服务网络和供应商状态后重试。';
+    if (sendEvent) {
+      sendEvent({ error: message, code: 'AI_PROVIDER_UNAVAILABLE' });
+      return res.end();
+    }
+    return error(res, 503, message, { code: 'AI_PROVIDER_UNAVAILABLE' });
   }
 
   // 500 类错误统一脱敏，避免把模型/驱动原文推到 SSE 或 JSON
@@ -458,6 +472,85 @@ async function scoreStream(req, res) {
   }
 }
 
+// 校验、额度检查与数据库入队仍在请求期完成；昂贵模型调用完全由后台 worker 执行。
+async function createInterviewQuestionJob(req) {
+  const userId = req.user.id
+  const requestKey = req.body.request_key
+  const existingJob = await interviewQuestionRepo.findGenerationJobByRequestKey(userId, requestKey)
+  if (existingJob) return { job: existingJob, reused: true }
+  const activeJob = await interviewQuestionRepo.findActiveGenerationJob(userId)
+  if (activeJob) return { busy: true, activeJobId: activeJob.id }
+  const previousSet = await interviewQuestionRepo.findByRequestKey(userId, requestKey)
+  if (previousSet?.generation_status === 'completed') return { completedSet: await interviewQuestionRepo.findSet(userId, previousSet.id) }
+  if (previousSet?.generation_status === 'generating') return { busy: true }
+
+  const context = await interviewQuestionService.prepareContext(userId, req.body)
+  await ensureAiQuota(req, 'interview_questions')
+  const queued = await interviewQuestionRepo.createGenerationJob(
+    userId, context, requestKey, { avoidHistory: Boolean(req.body.avoid_history) },
+  )
+  if (queued.busy) return queued
+  if (queued.conflict) return { busy: true }
+  return { job: queued.job, reused: Boolean(queued.reused), created: Boolean(queued.created) }
+}
+
+function interviewJobResponse(job, reused = false) {
+  return {
+    job_id: job.id,
+    set_id: job.set_id,
+    status: job.status,
+    stage: job.stage,
+    generated_count: job.generated_count,
+    total_count: job.total_count,
+    reused,
+  }
+}
+
+function sendActiveJobConflict(res, activeJobId) {
+  return res.status(409).json({
+    success: false,
+    code: 'INTERVIEW_GENERATION_ACTIVE',
+    detail: '已有一套面试题正在后台生成，请先查看当前进度。',
+    active_job_id: activeJobId || null,
+  })
+}
+
+async function enqueueInterviewQuestionJob(req, res) {
+  try {
+    const result = await createInterviewQuestionJob(req)
+    if (result.busy) return sendActiveJobConflict(res, result.activeJobId)
+    if (result.completedSet) return res.json({ success: true, data: result.completedSet, message: '已返回本次生成的面试题' })
+    return res.status(result.job.status === 'completed' ? 200 : 202).json({
+      success: true,
+      data: interviewJobResponse(result.job, result.reused),
+      message: result.reused ? '已恢复此前的生成任务' : '题目已加入后台生成队列',
+    })
+  } catch (error) {
+    return respondAiError(res, error)
+  }
+}
+
+// 旧同步路由保留为队列别名，防止旧客户端绕过同用户单活动任务限制。
+async function generateInterviewQuestions(req, res) {
+  return enqueueInterviewQuestionJob(req, res)
+}
+
+// 旧 SSE 路由只确认持久化任务已入队，不把后台执行重新绑回 HTTP 流生命周期。
+async function generateInterviewQuestionsStream(req, res) {
+  const sendEvent = setupSSE(res)
+  try {
+    const result = await createInterviewQuestionJob(req)
+    if (result.busy) {
+      sendEvent({ error: '已有一套面试题正在后台生成，请先查看当前进度。', code: 'INTERVIEW_GENERATION_ACTIVE', job_id: result.activeJobId || null })
+    } else {
+      sendEvent({ stage: 'queued', status: '任务已保存到后台，可离开页面后再查看进度', job: result.job ? interviewJobResponse(result.job, result.reused) : result.completedSet })
+    }
+    return res.end()
+  } catch (error) {
+    return respondAiError(res, error, { sendEvent })
+  }
+}
+
 module.exports = {
   generate,
   generateStream,
@@ -470,4 +563,7 @@ module.exports = {
   matchJd,
   score,
   scoreStream,
+  enqueueInterviewQuestionJob,
+  generateInterviewQuestions,
+  generateInterviewQuestionsStream,
 };

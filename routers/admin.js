@@ -5,9 +5,12 @@
 
 const express = require('express')
 const { authRequired } = require('../middlewares/auth')
+const { validate } = require('../middlewares/validate')
 const { requireAdmin, requirePermission, requireRole } = require('../middlewares/permission')
 const { PERMISSIONS, ROLES } = require('../utils/permissions')
 const adminController = require('../controllers/admin.controller')
+const interviewController = require('../controllers/interview.controller')
+const interviewValidator = require('../validators/interview.validator')
 
 const router = express.Router()
 
@@ -50,6 +53,10 @@ router.get('/ai-calls', requirePermission(PERMISSIONS.ADMIN_VIEW_AI_CALLS), admi
 // 简历管理
 router.get('/resumes', requirePermission(PERMISSIONS.ADMIN_VIEW_RESUMES), adminController.listResumes)
 router.get('/resumes/:id', requirePermission(PERMISSIONS.ADMIN_VIEW_RESUMES), adminController.getResume)
+
+// 管理端只读题库沿用独立权限；服务端列表和详情再次执行 ADMIN 归属校验。
+router.get('/interview-question-sets', requirePermission(PERMISSIONS.ADMIN_VIEW_INTERVIEW_BANK), interviewValidator.adminList, validate, interviewController.listAdminSets)
+router.get('/interview-question-sets/:setId', requirePermission(PERMISSIONS.ADMIN_VIEW_INTERVIEW_BANK), interviewValidator.setId, validate, interviewController.getAdminSet)
 
 // 系统配置
 router.get('/configs', requirePermission(PERMISSIONS.ADMIN_SYSTEM_CONFIG), adminController.listConfigs)

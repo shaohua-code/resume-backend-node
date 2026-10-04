@@ -52,7 +52,7 @@ async function recordAiCall(req, taskType, model, success, errorMessage = '', me
 
   if (error) {
     console.error('[recordAiCall]', error.message, { taskType, meta })
-    return
+    return null
   }
 
   // 仅成功调用且费用大于 0 时扣减余额
@@ -63,6 +63,7 @@ async function recordAiCall(req, taskType, model, success, errorMessage = '', me
       console.error('[recordAiCall] deduct failed:', deductErr.message, { taskType, cost })
     }
   }
+  return callRecord?.id || null
 }
 
 module.exports = {

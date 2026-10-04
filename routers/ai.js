@@ -6,6 +6,7 @@
 
 const express = require('express')
 const { authRequired, emailBindingRequired } = require('../middlewares/auth')
+const { iamAuthorizationRequired } = require('../middlewares/iamAuthorization')
 const { validate } = require('../middlewares/validate')
 const aiController = require('../controllers/ai.controller')
 const aiValidator = require('../validators/ai.validator')
@@ -15,6 +16,8 @@ const router = express.Router()
 // 所有 AI 接口必须先登录，再由服务端确认当前账号已绑定并验证邮箱。
 router.use(authRequired)
 router.use(emailBindingRequired)
+// 已绑定 IAM 的用户还必须拥有 AI 功能权限；未绑定账户维持本地 RBAC 兼容路径。
+router.use(iamAuthorizationRequired('ai'))
 
 /**
  * AI 生成简历（同步）
@@ -85,5 +88,12 @@ router.post('/score', aiValidator.score, validate, aiController.score)
  * POST /api/ai/score/stream
  */
 router.post('/score/stream', aiValidator.score, validate, aiController.scoreStream)
+
+// 面试题生成只负责校验和入队，后台 worker 从服务端任务映射调用模型。
+router.post('/interview-question-jobs', aiValidator.interviewQuestions, validate, aiController.enqueueInterviewQuestionJob)
+// 保留旧 POST 路径作为异步队列兼容别名，不再同步占用 HTTP 请求等待模型。
+router.post('/interview-questions', aiValidator.interviewQuestions, validate, aiController.generateInterviewQuestions)
+// 兼容旧 SSE 客户端时只推送任务入队确认；进度通过登录用户任务接口读取。
+router.post('/interview-questions/stream', aiValidator.interviewQuestions, validate, aiController.generateInterviewQuestionsStream)
 
 module.exports = router

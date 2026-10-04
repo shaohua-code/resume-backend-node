@@ -69,6 +69,20 @@ const score = [
   body('resume_id').optional().isString().withMessage('resume_id 必须是字符串'),
 ]
 
+// 仅接受本人的资源编号、有限题量和稳定幂等键；模型配置不接受客户端指定。
+const interviewQuestions = [
+  body('resume_id').isInt({ min: 1 }).withMessage('请选择有效简历'),
+  body('career_goal_id').optional({ values: 'falsy' }).isInt({ min: 1 }).withMessage('求职目标无效'),
+  body('saved_job_id').optional({ values: 'falsy' }).isInt({ min: 1 }).withMessage('收藏岗位无效'),
+  body('target_position').optional().isString().isLength({ max: 160 }).withMessage('目标岗位最多 160 个字符'),
+  body('jd_text').optional().isString().isLength({ max: 12000 }).withMessage('岗位描述最多 12000 个字符'),
+  body('question_count').optional().isIn([10, 20, 30, '10', '20', '30']).withMessage('题量仅支持 10、20 或 30 题'),
+  body('categories').optional().isArray({ max: 5 }).withMessage('题目类型无效'),
+  body('categories.*').optional().isIn(['professional', 'project', 'behavioral', 'gap', 'reverse']).withMessage('题目类型无效'),
+  body('avoid_history').optional().isBoolean().withMessage('历史去重选项无效'),
+  body('request_key').isUUID().withMessage('生成请求标识无效'),
+]
+
 module.exports = {
   generate,
   extractResume,
@@ -76,4 +90,5 @@ module.exports = {
   optimizeByJdStream,
   matchJd,
   score,
+  interviewQuestions,
 }

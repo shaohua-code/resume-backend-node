@@ -167,7 +167,7 @@ nano /tmp/init.sql
 psql -h 127.0.0.1 -U ai_resume -d ai_resume -f /tmp/init.sql
 ```
 
-### 4.3 验证（应有 33 张表）
+### 4.3 验证（应有 42 张表）
 
 ```bash
 psql -h 127.0.0.1 -U ai_resume -d ai_resume -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';"
@@ -591,7 +591,7 @@ psql -h 127.0.0.1 -U ai_resume -d ai_resume -v ON_ERROR_STOP=1 -f database/migra
 □ 1. SSH 能登录
 □ 2. PostgreSQL 运行中：sudo systemctl status postgresql
 □ 3. 数据库 ai_resume 已创建
-□ 4. 全新数据库已初始化，或既有数据库已执行适用的增量脚本；当前结构契约 = 33 张表
+□ 4. 全新数据库已初始化，或既有数据库已执行适用的增量脚本；当前结构契约 = 42 张表
 □ 5. 代码在 /var/www/resume-backend-node
 □ 6. .env 中 DATABASE_URL 用 127.0.0.1
 □ 7. pm2 status 显示 online

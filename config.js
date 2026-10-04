@@ -62,6 +62,16 @@ const settings = {
   IAM_TOKEN_ENCRYPTION_KEY: process.env.IAM_TOKEN_ENCRYPTION_KEY || '',
   IAM_CLIENT_SECRET: process.env.IAM_CLIENT_SECRET || '',
   IAM_REDIRECT_URI: process.env.IAM_REDIRECT_URI || '',
+  // 中心 IAM 权限码需要先在平台创建并授予 AI 简历对应角色。
+  IAM_RESUME_READ_PERMISSION_CODE: process.env.IAM_RESUME_READ_PERMISSION_CODE || 'resume.read',
+  IAM_RESUME_WRITE_PERMISSION_CODE: process.env.IAM_RESUME_WRITE_PERMISSION_CODE || 'resume.write',
+  IAM_RESUME_EXPORT_PERMISSION_CODE: process.env.IAM_RESUME_EXPORT_PERMISSION_CODE || 'resume.export',
+  // AI 路由使用应用级权限，不把简历、模型等本地业务 ID 冒充 IAM 资源 ID。
+  IAM_AI_PERMISSION_CODE: process.env.IAM_AI_PERMISSION_CODE || 'ai.generate',
+  // 本地 model_key 到 IAM model_catalog UUID 的服务端映射；不能接受浏览器传入目录 ID。
+  IAM_MODEL_ID_MAP_JSON: process.env.IAM_MODEL_ID_MAP_JSON || '{}',
+  // 可选网关密钥；配置后才向 IAM 申请 RPM/TPM 预留并报告模型用量。
+  IAM_MODEL_USAGE_API_KEY: process.env.IAM_MODEL_USAGE_API_KEY || '',
   APP_FRONTEND_URL: process.env.APP_FRONTEND_URL || process.env.FRONTEND_URL || 'http://localhost:5173',
 
   // 邮件内图片等资源的公网绝对 URL 前缀（默认可读 APP_PUBLIC_URL）

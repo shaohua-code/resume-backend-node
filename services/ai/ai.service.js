@@ -18,6 +18,8 @@ const {
   resolveModelConfig,
   resolveDeepseekFallbackConfig,
 } = require('./ai.model');
+const { requireIamModelPermission } = require('../iam/iamAuthorization.service');
+const { reserveIamModelUsage, settleIamModelUsage } = require('../iam/iamModelUsage.service');
 const { withDeepseekFallback } = require('./ai.fallback');
 const {
   hasResumeContent,
@@ -86,7 +88,8 @@ function applyRuntimeOptions(payload, runtime) {
 
 /** 从调用 options 提取温度、max_tokens、JSON 模式等可选参数 */
 function pickCallOptions(options = {}) {
-  const callOptions = {};
+  // 用户 ID 只用于服务端 IAM 模型授权，不会进入 Provider payload。
+  const callOptions = { userId: options.userId };
   if (typeof options.temperature === 'number') callOptions.temperature = options.temperature;
   if (typeof options.max_tokens === 'number') callOptions.max_tokens = options.max_tokens;
   if (options.responseFormat) callOptions.responseFormat = options.responseFormat;
@@ -99,29 +102,40 @@ function pickCallOptions(options = {}) {
  */
 async function callChatCompletion(prompt, runtime, callOptions = {}) {
   assertRuntimeConfig(runtime);
+  const iamContext = await requireIamModelPermission(callOptions.userId, runtime.modelKey);
   const headers = {
     Authorization: `Bearer ${runtime.apiKey}`,
     'Content-Type': 'application/json',
   };
   const model = runtime.modelKey;
+  const maxTokens = typeof callOptions.max_tokens === 'number' ? callOptions.max_tokens : 4096;
   const payload = {
     model,
     messages: [{ role: 'user', content: prompt }],
     temperature: typeof callOptions.temperature === 'number' ? callOptions.temperature : 0.7,
-    max_tokens: typeof callOptions.max_tokens === 'number' ? callOptions.max_tokens : 4096,
+    max_tokens: maxTokens,
   };
   if (callOptions.responseFormat) {
     payload.response_format = callOptions.responseFormat;
   }
   applyRuntimeOptions(payload, runtime);
-  const response = await axios.post(runtime.apiUrl, payload, {
-    headers,
-    timeout: 60000,
-  });
-  const usage = normalizeUsage(response.data.usage || {});
-  const cost = await calcAiCost(model, usage);
+  const usageHandle = await reserveIamModelUsage(iamContext, prompt, maxTokens);
+  let response;
+  try {
+    response = await axios.post(runtime.apiUrl, payload, {
+      headers,
+      timeout: 60000,
+    });
+  } catch (error) {
+    await settleIamModelUsage(usageHandle, null, 'failed');
+    throw error;
+  }
+  const providerUsage = response.data.usage || {};
+  const usage = normalizeUsage(providerUsage);
   // 只取最终回答；思考过程在 reasoning_content，不能参与 JSON 解析
   const message = response.data.choices?.[0]?.message || {};
+  await settleIamModelUsage(usageHandle, providerUsage, 'succeeded', message.content || '');
+  const cost = await calcAiCost(model, usage);
   return {
     content: message.content || '',
     usage,
@@ -140,6 +154,10 @@ async function callDeepseek(prompt, options = {}) {
       return callChatCompletion(prompt, runtime, callOptions);
     },
     () => callChatCompletion(prompt, resolveDeepseekFallbackConfig(options.task), callOptions),
+    {
+      // IAM 拒绝或不可用属于安全边界，不能借业务模型 fallback 换模型继续调用。
+      canFallback: (error) => !String(error?.code || '').startsWith('IAM_'),
+    },
   );
 }
 
@@ -198,18 +216,20 @@ function consumeChatCompletionSse(responseStream, onChunk) {
  * 流式调用 OpenAI 兼容接口，通过 onChunk 回调推送增量文本。
  * @returns {Promise<{ content: string, usage: object, model: string, cost: number }>}
  */
-async function callChatCompletionStream(prompt, runtime, onChunk, callOptions = {}) {
+async function callChatCompletionStream(prompt, runtime, onChunk, callOptions = {}, onStatus) {
   assertRuntimeConfig(runtime);
+  const iamContext = await requireIamModelPermission(callOptions.userId, runtime.modelKey);
   const headers = {
     Authorization: `Bearer ${runtime.apiKey}`,
     'Content-Type': 'application/json',
   };
   const model = runtime.modelKey;
+  const maxTokens = typeof callOptions.max_tokens === 'number' ? callOptions.max_tokens : 4096;
   const payload = {
     model,
     messages: [{ role: 'user', content: prompt }],
     temperature: typeof callOptions.temperature === 'number' ? callOptions.temperature : 0.7,
-    max_tokens: typeof callOptions.max_tokens === 'number' ? callOptions.max_tokens : 4096,
+    max_tokens: maxTokens,
     stream: true,
     stream_options: { include_usage: true },
   };
@@ -217,18 +237,40 @@ async function callChatCompletionStream(prompt, runtime, onChunk, callOptions = 
     payload.response_format = callOptions.responseFormat;
   }
   applyRuntimeOptions(payload, runtime);
-  const response = await axios.post(runtime.apiUrl, payload, {
-    headers,
-    timeout: 120000,
-    responseType: 'stream',
-  });
+  const usageHandle = await reserveIamModelUsage(iamContext, prompt, maxTokens);
+  let response;
+  try {
+    response = await axios.post(runtime.apiUrl, payload, {
+      headers,
+      timeout: 120000,
+      responseType: 'stream',
+    });
+  } catch (error) {
+    await settleIamModelUsage(usageHandle, null, 'failed');
+    throw error;
+  }
 
-  const { content, usage, finishReason } = await consumeChatCompletionSse(response.data, onChunk);
+  // 收到 Provider 的成功响应后通知调用方；不暴露模型内部推理文本。
+  onStatus?.('model', '模型已连接，正在分析简历与岗位要求');
+
+  let partialContent = '';
+  let streamResult;
+  try {
+    streamResult = await consumeChatCompletionSse(response.data, (chunk, full) => {
+      partialContent = full;
+      if (typeof onChunk === 'function') onChunk(chunk, full);
+    });
+  } catch (error) {
+    await settleIamModelUsage(usageHandle, null, 'failed', partialContent);
+    throw error;
+  }
+  const { content, usage, finishReason } = streamResult;
+  await settleIamModelUsage(usageHandle, usage, 'succeeded', content);
   const meta = await buildMeta(model, usage);
   return { content, finishReason, ...meta };
 }
 
-async function callDeepseekStream(prompt, options = {}, onChunk) {
+async function callDeepseekStream(prompt, options = {}, onChunk, onStatus) {
   let primaryEmittedContent = false;
   const handlePrimaryChunk = (chunk, full) => {
     primaryEmittedContent = true;
@@ -240,18 +282,20 @@ async function callDeepseekStream(prompt, options = {}, onChunk) {
     options.task,
     async () => {
       const runtime = await resolveModelConfig(options.task, options.model, options.userId);
-      return callChatCompletionStream(prompt, runtime, handlePrimaryChunk, callOptions);
+      return callChatCompletionStream(prompt, runtime, handlePrimaryChunk, callOptions, onStatus);
     },
     () => callChatCompletionStream(
       prompt,
       resolveDeepseekFallbackConfig(options.task),
       onChunk,
       callOptions,
+      onStatus,
     ),
     {
       // 已推送的半截内容无法从 SSE 客户端撤回；此时禁止拼接第二份流，
       // 继续沿用首次错误。只有首个内容片段前失败才安全兜底。
-      canFallback: () => !primaryEmittedContent,
+      // IAM 授权错误不能通过 fallback 切换模型来绕过。
+      canFallback: (error) => !primaryEmittedContent && !String(error?.code || '').startsWith('IAM_'),
     },
   );
 }
@@ -265,6 +309,7 @@ async function callDeepseekStream(prompt, options = {}, onChunk) {
 async function callDeepseekVision(imageBuffer, mimeType, textPrompt, options = {}) {
   const runtime = await resolveModelConfig(options.task, options.model, options.userId);
   assertRuntimeConfig(runtime);
+  const iamContext = await requireIamModelPermission(options.userId, runtime.modelKey);
   const model = runtime.modelKey;
   const base64 = imageBuffer.toString('base64');
   const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${base64}`;
@@ -285,14 +330,24 @@ async function callDeepseekVision(imageBuffer, mimeType, textPrompt, options = {
     max_tokens: 4096,
   };
   applyRuntimeOptions(payload, runtime);
-  const response = await axios.post(runtime.apiUrl, payload, {
-    headers,
-    timeout: 90000,
-  });
-  const usage = normalizeUsage(response.data.usage || {});
+  const usageHandle = await reserveIamModelUsage(iamContext, textPrompt, payload.max_tokens, imageBuffer.length);
+  let response;
+  try {
+    response = await axios.post(runtime.apiUrl, payload, {
+      headers,
+      timeout: 90000,
+    });
+  } catch (error) {
+    await settleIamModelUsage(usageHandle, null, 'failed');
+    throw error;
+  }
+  const providerUsage = response.data.usage || {};
+  const usage = normalizeUsage(providerUsage);
+  const content = response.data.choices?.[0]?.message?.content || '';
+  await settleIamModelUsage(usageHandle, providerUsage, 'succeeded', content);
   const cost = await calcAiCost(model, usage);
   return {
-    content: response.data.choices[0].message.content,
+    content,
     usage,
     model,
     cost,
@@ -1114,6 +1169,178 @@ async function scoreResume(resumeContent, options = {}) {
   };
 }
 
+// 只接受有限字段和已知题型，防止模型附带解释、超量或虚构结构污染用户题库。
+const INTERVIEW_QUESTION_CATEGORIES = new Set(['professional', 'project', 'behavioral', 'gap', 'reverse'])
+function normalizeInterviewQuestionItem(item) {
+  const clean = (value, max) => String(value || '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max)
+  return {
+    category: INTERVIEW_QUESTION_CATEGORIES.has(item?.category) ? item.category : 'professional',
+    question: clean(item?.question, 1200),
+    evaluation_focus: clean(item?.evaluation_focus, 1200),
+    resume_evidence: clean(item?.resume_evidence, 1600),
+    answer_guidance: clean(item?.answer_guidance, 1600),
+  }
+}
+
+// 从 JSON 流中只释放已经完整闭合且字段有效的题目，前端不会看到半截 JSON。
+function createInterviewQuestionStreamParser(requestedCount, onQuestion) {
+  let content = ''
+  let cursor = 0
+  let arrayStart = -1
+  let objectStart = -1
+  let depth = 0
+  let inString = false
+  let escaped = false
+  let emitted = 0
+  return (chunk) => {
+    content += chunk
+    if (arrayStart < 0) {
+      const match = /"questions"\s*:\s*\[/.exec(content)
+      if (!match) return
+      arrayStart = match.index + match[0].length
+      cursor = arrayStart
+    }
+    for (; cursor < content.length && emitted < requestedCount; cursor += 1) {
+      const char = content[cursor]
+      if (objectStart < 0) {
+        if (char === '{') { objectStart = cursor; depth = 1; inString = false; escaped = false }
+        else if (char === ']') break
+        continue
+      }
+      if (inString) {
+        if (escaped) escaped = false
+        else if (char === '\\') escaped = true
+        else if (char === '"') inString = false
+        continue
+      }
+      if (char === '"') inString = true
+      else if (char === '{') depth += 1
+      else if (char === '}') {
+        depth -= 1
+        if (depth === 0) {
+          try {
+            const question = normalizeInterviewQuestionItem(JSON.parse(content.slice(objectStart, cursor + 1)))
+            if (question.question && question.evaluation_focus) onQuestion?.(question, emitted)
+            if (question.question && question.evaluation_focus) emitted += 1
+          } catch { /* 不把尚未形成有效对象的内容发送到客户端。 */ }
+          objectStart = -1
+        }
+      }
+    }
+  }
+}
+
+function normalizeInterviewQuestions(content, requestedCount) {
+  const parsed = extractJson(content)
+  const source = Array.isArray(parsed?.questions) ? parsed.questions : []
+  const questions = source.slice(0, requestedCount).map(normalizeInterviewQuestionItem)
+    .filter((item) => item.question && item.evaluation_focus)
+  if (!questions.length) {
+    throw Object.assign(new Error('AI 未能生成有效面试题，请调整岗位信息后重试'), { code: 'INTERVIEW_QUESTIONS_INVALID', statusCode: 502 })
+  }
+  return { questions }
+}
+
+/** 使用后台 interview_questions 专属任务映射生成结构化面试题。 */
+async function generateInterviewQuestions(input, options = {}) {
+  const prompt = await buildTaskPrompt(AI_TASK.INTERVIEW_QUESTIONS, {
+    resume_json: JSON.stringify(input.resumeJson || {}),
+    target_position: input.targetPosition,
+    jd_text: input.jdText || '未提供岗位描述，请结合目标岗位名称与简历内容生成',
+    categories: (input.categories || []).join('、') || '综合岗位能力、项目经历和行为面试',
+    question_count: input.questionCount,
+    avoid_questions: (input.avoidQuestions || []).map((question, index) => `${index + 1}. ${question}`).join('\n') || '无',
+  }, options)
+  const { content, usage, model, cost } = await callDeepseek(prompt, {
+    ...modelCallOptions(AI_TASK.INTERVIEW_QUESTIONS, options),
+    responseFormat: { type: 'json_object' },
+    temperature: 0.45,
+    max_tokens: 6000,
+  })
+  return { data: normalizeInterviewQuestions(content, input.questionCount), meta: { model, usage, cost } }
+}
+
+/** 题目按完整 JSON 对象逐条回调，最终结构仍通过同一规范化函数校验。 */
+async function generateInterviewQuestionsStream(input, options = {}, onQuestion, onStatus) {
+  const prompt = await buildTaskPrompt(AI_TASK.INTERVIEW_QUESTIONS, {
+    resume_json: JSON.stringify(input.resumeJson || {}),
+    target_position: input.targetPosition,
+    jd_text: input.jdText || '未提供岗位描述，请结合目标岗位名称与简历内容生成',
+    categories: (input.categories || []).join('、') || '综合岗位能力、项目经历和行为面试',
+    question_count: input.questionCount,
+    avoid_questions: (input.avoidQuestions || []).map((question, index) => `${index + 1}. ${question}`).join('\n') || '无',
+  }, options)
+  const parseChunk = createInterviewQuestionStreamParser(input.questionCount, onQuestion)
+  onStatus?.('connecting', '正在连接面试题生成模型');
+  const { content, usage, model, cost } = await callDeepseekStream(prompt, {
+    ...modelCallOptions(AI_TASK.INTERVIEW_QUESTIONS, options),
+    responseFormat: { type: 'json_object' },
+    temperature: 0.45,
+    max_tokens: 6000,
+  }, parseChunk, onStatus)
+  onStatus?.('validating', '模型已完成生成，正在校验题目内容');
+  const meta = { model, usage, cost }
+  try {
+    return { data: normalizeInterviewQuestions(content, input.questionCount), meta }
+  } catch (error) {
+    // 模型已返回内容但结构校验失败时仍携带真实用量，供异步 worker 正确记录调用成本。
+    error.aiMeta = meta
+    throw error
+  }
+}
+
+// 面试回答点评统一归一成有限字段，避免未校验的模型 JSON 进入用户题库。
+function normalizeInterviewAnswerReview(content) {
+  const parsed = extractJson(content)
+  const allowedAssessments = new Set(['strong', 'partial', 'needs_revision', 'insufficient_evidence'])
+  if (!parsed || !allowedAssessments.has(parsed.assessment)) {
+    throw Object.assign(new Error('AI 未能生成有效的回答点评，请稍后重试'), { code: 'INTERVIEW_REVIEW_INVALID', statusCode: 502 })
+  }
+  const text = (value, max = 800) => String(value ?? '').trim().slice(0, max)
+  const list = (value) => (Array.isArray(value) ? value : []).map((item) => text(item, 360)).filter(Boolean).slice(0, 6)
+  const score = (value) => Math.max(1, Math.min(5, Math.round(Number(value) || 1)))
+  return {
+    assessment: parsed.assessment,
+    summary: text(parsed.summary, 1200),
+    rubric: {
+      coverage: score(parsed.rubric?.coverage),
+      evidence: score(parsed.rubric?.evidence),
+      structure: score(parsed.rubric?.structure),
+      clarity: score(parsed.rubric?.clarity),
+    },
+    strengths: list(parsed.strengths),
+    gaps: list(parsed.gaps),
+    unsupported_claims: list(parsed.unsupported_claims),
+    suggestions: list(parsed.suggestions),
+  }
+}
+
+// 回答点评是独立计费任务；仅把必要题目、岗位和简历证据送入服务端模型。
+async function reviewInterviewAnswer(input, options = {}) {
+  const prompt = await buildTaskPrompt(AI_TASK.INTERVIEW_ANSWER_REVIEW, {
+    question: input.question,
+    evaluation_focus: input.evaluationFocus || '',
+    target_position: input.targetPosition || '',
+    jd_text: input.jdText || '',
+    resume_evidence: JSON.stringify(input.resumeEvidence || {}),
+    answer: input.answer,
+  }, options)
+  const { content, usage, model, cost } = await callDeepseek(prompt, {
+    ...modelCallOptions(AI_TASK.INTERVIEW_ANSWER_REVIEW, options),
+    responseFormat: { type: 'json_object' },
+    temperature: 0.2,
+    max_tokens: 1800,
+  })
+  const meta = { model, usage, cost }
+  try {
+    return { data: normalizeInterviewAnswerReview(content), meta }
+  } catch (error) {
+    // 点评 JSON 无效时也保留模型实际用量，使失败审计不漏记已经发出的请求。
+    error.aiMeta = meta
+    throw error
+  }
+}
+
 /**
  * 多模态视觉流式调用：从图片提取文本并通过 onChunk 推送增量文本。
  * @param {Buffer} imageBuffer 图片二进制
@@ -1122,6 +1349,7 @@ async function scoreResume(resumeContent, options = {}) {
 async function callDeepseekVisionStream(imageBuffer, mimeType, textPrompt, options = {}, onChunk) {
   const runtime = await resolveModelConfig(options.task, options.model, options.userId);
   assertRuntimeConfig(runtime);
+  const iamContext = await requireIamModelPermission(options.userId, runtime.modelKey);
   const model = runtime.modelKey;
   const base64 = imageBuffer.toString('base64');
   const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${base64}`;
@@ -1144,14 +1372,33 @@ async function callDeepseekVisionStream(imageBuffer, mimeType, textPrompt, optio
     stream_options: { include_usage: true },
   };
   applyRuntimeOptions(payload, runtime);
-  const response = await axios.post(runtime.apiUrl, payload, {
-    headers,
-    timeout: 120000,
-    responseType: 'stream',
-  });
+  const usageHandle = await reserveIamModelUsage(iamContext, textPrompt, payload.max_tokens, imageBuffer.length);
+  let response;
+  try {
+    response = await axios.post(runtime.apiUrl, payload, {
+      headers,
+      timeout: 120000,
+      responseType: 'stream',
+    });
+  } catch (error) {
+    await settleIamModelUsage(usageHandle, null, 'failed');
+    throw error;
+  }
 
   // 与文本流共用安全解码，避免视觉流中文同样被截成乱码
-  const { content, usage } = await consumeChatCompletionSse(response.data, onChunk);
+  let partialContent = '';
+  let streamResult;
+  try {
+    streamResult = await consumeChatCompletionSse(response.data, (chunk, full) => {
+      partialContent = full;
+      if (typeof onChunk === 'function') onChunk(chunk, full);
+    });
+  } catch (error) {
+    await settleIamModelUsage(usageHandle, null, 'failed', partialContent);
+    throw error;
+  }
+  const { content, usage } = streamResult;
+  await settleIamModelUsage(usageHandle, usage, 'succeeded', content);
   const meta = await buildMeta(model, usage);
   return { content, ...meta };
 }
@@ -1313,6 +1560,9 @@ module.exports = {
   optimizeWorkExperienceStream,
   matchJd,
   scoreResume,
+  generateInterviewQuestions,
+  generateInterviewQuestionsStream,
+  reviewInterviewAnswer,
   scoreResumeStream,
   optimizeFromPdfText,
   optimizeFromPdfTextStream,

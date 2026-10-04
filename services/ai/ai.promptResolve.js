@@ -17,6 +17,8 @@ const {
   OPTIMIZE_WORK_EXPERIENCE_PROMPT,
   JD_MATCH_PROMPT,
   SCORE_PROMPT,
+  INTERVIEW_QUESTIONS_PROMPT,
+  INTERVIEW_ANSWER_REVIEW_PROMPT,
   SCORE_STREAM_PROMPT,
   PDF_OPTIMIZE_PROMPT,
   JD_RESUME_OPTIMIZE_PROMPT,
@@ -45,6 +47,9 @@ const FULL_PROMPTS = {
   [AI_TASK.WORK_EXPERIENCE_OPTIMIZE]: OPTIMIZE_WORK_EXPERIENCE_PROMPT,
   [AI_TASK.JD_MATCH]: JD_MATCH_PROMPT,
   [AI_TASK.SCORE]: SCORE_PROMPT,
+  [AI_TASK.INTERVIEW_QUESTIONS]: INTERVIEW_QUESTIONS_PROMPT,
+  // 回答点评模板与题目生成分开，避免错误复用题目数组契约。
+  [AI_TASK.INTERVIEW_ANSWER_REVIEW]: INTERVIEW_ANSWER_REVIEW_PROMPT,
   score_stream: SCORE_STREAM_PROMPT,
   [AI_TASK.PDF_OPTIMIZE]: PDF_OPTIMIZE_PROMPT,
   [AI_TASK.JD_RESUME_OPTIMIZE]: JD_RESUME_OPTIMIZE_PROMPT,
@@ -121,6 +126,17 @@ match_score 为 0-100 整数；六个分析字段必须依据简历和岗位原�
 只输出可 JSON.parse 的纯 JSON 对象，不得输出 markdown，字段严格为：
 {"content_completeness":0,"skill_match":0,"project_quality":0,"resume_structure":0,"format_quality":0,"total":0,"summary":""}
 五个维度依次不得超过 20、20、30、15、15，均为整数；total 必须严格等于五项之和；summary 用中文概括评分依据。`,
+  ),
+  [AI_TASK.INTERVIEW_QUESTIONS]: composePrompt(
+    COMMON_INPUT_BOUNDARY,
+    `## 输入数据\n<resume_json>\n{resume_json}\n</resume_json>\n<target_position>\n{target_position}\n</target_position>\n<job_description>\n{jd_text}\n</job_description>\n<categories>\n{categories}\n</categories>\n<question_count>{question_count}</question_count>\n<avoid_questions>\n{avoid_questions}\n</avoid_questions>`,
+    `## 输出强制约束\n只输出可解析 JSON 对象，不得输出 Markdown，结构严格为 {"questions":[{"category":"professional|project|behavioral|gap|reverse","question":"","evaluation_focus":"","resume_evidence":"","answer_guidance":""}]}。question 为具体、可练习的问题；evaluation_focus 说明考察点；resume_evidence 只引用输入里存在的简短事实，缺少事实时留空；answer_guidance 只提示组织真实事实的方法，禁止编造回答。questions 数量不得超过 {question_count}，优先满足指定题量和类别。不得复述 avoid_questions 中的问题或仅替换同义词。`,
+  ),
+  // 管理员/用户覆盖业务文案时仍只能返回固定点评 JSON，且输入证据保持清晰分隔。
+  [AI_TASK.INTERVIEW_ANSWER_REVIEW]: composePrompt(
+    COMMON_INPUT_BOUNDARY,
+    `## 输入数据\n<question>{question}</question>\n<evaluation_focus>{evaluation_focus}</evaluation_focus>\n<target_position>{target_position}</target_position>\n<job_description>{jd_text}</job_description>\n<resume_evidence>{resume_evidence}</resume_evidence>\n<answer>{answer}</answer>`,
+    `## 输出强制约束\n只输出可解析的 JSON 对象，不得输出 Markdown，字段严格为：{"assessment":"strong|partial|needs_revision|insufficient_evidence","summary":"","rubric":{"coverage":1,"evidence":1,"structure":1,"clarity":1},"strengths":[],"gaps":[],"unsupported_claims":[],"suggestions":[]}。rubric 四项均为 1–5 整数；数组为中文字符串数组，最多各 6 项；summary 不得宣称客观正确或编造事实。` ,
   ),
   score_stream: composePrompt(
     COMMON_INPUT_BOUNDARY,

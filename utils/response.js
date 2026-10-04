@@ -6,7 +6,7 @@
 const BUSY_MESSAGE = '服务暂时繁忙，请稍后重试'
 
 /** 疑似驱动/堆栈/SQL 等不应直接返回给前端的原文 */
-const TECHNICAL_PATTERN = /(at\s+\S+|stack|ECONN|ENOENT|postgres|sql|syntax error|TypeError|ReferenceError|Cannot read|ETIMEDOUT|ECONNREFUSED|relation "|column )/i
+const TECHNICAL_PATTERN = /(at\s+\S+|stack|ECONN|ENOENT|postgres|sql|syntax error|TypeError|ReferenceError|Cannot read|ETIMEDOUT|ECONNREFUSED|socket hang up|reset by peer|network socket disconnected|client network socket disconnected|secure TLS connection|relation "|column )/i
 
 function success(res, data, message = '') {
   return res.json({ success: true, data, message });
