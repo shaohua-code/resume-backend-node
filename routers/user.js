@@ -4,7 +4,6 @@
 
 const express = require('express')
 const { authRequired, emailBindingRequired } = require('../middlewares/auth')
-const { iamAuthorizationRequired } = require('../middlewares/iamAuthorization')
 const { validate } = require('../middlewares/validate')
 const userController = require('../controllers/user.controller')
 const interviewController = require('../controllers/interview.controller')
@@ -32,8 +31,8 @@ router.delete('/interview-question-sets/:setId', interviewValidator.setId, valid
 router.get('/interview-question-jobs/active', interviewController.getActiveGenerationJob)
 router.get('/interview-question-jobs', interviewValidator.jobList, validate, interviewController.listMyGenerationJobs)
 router.get('/interview-question-jobs/:jobId', interviewValidator.jobId, validate, interviewController.getMyGenerationJob)
-// 点评会触发独立 AI 调用，因此沿用邮箱绑定与 IAM AI 权限门禁。
-router.post('/interview-question-sets/:setId/questions/:questionId/reviews', emailBindingRequired, iamAuthorizationRequired('ai'), interviewValidator.answerReview, validate, interviewController.createAnswerReview)
+// 点评会触发独立 AI 调用，因此沿用邮箱绑定门禁。
+router.post('/interview-question-sets/:setId/questions/:questionId/reviews', emailBindingRequired, interviewValidator.answerReview, validate, interviewController.createAnswerReview)
 router.get('/interview-question-sets/:setId/questions/:questionId/reviews', interviewValidator.reviewList, validate, interviewController.listAnswerReviews)
 
 router.get('/task-models', userController.listTaskModels)

@@ -1,5 +1,7 @@
 # AI 简历后端服务
 
+> IAM 接入状态（2026-10-10）：AI Resume 当前没有 IAM/OIDC 登录、中央授权、data_scope 运行代码、专属配置/迁移/测试或前端登录与账号绑定入口；本产品继续使用自身本地认证及业务授权。IAM 当前唯一活跃业务试点为 DeerFlow。此前简历 IAM 接入描述仅为历史快照。此状态更新没有修改真实 .env 或数据库。
+
 基于 **Node.js + Express + PostgreSQL + JWT** 的全行业简历 AI 后端 API，当前使用 DeepSeek V4 Flash 处理文本任务、Qwen3.6 Flash 处理视觉任务，并支持由超级管理员按任务切换 OpenAI 兼容模型。
 
 ## 技术栈
@@ -196,7 +198,7 @@ npm start
 # 当前工作区缺少 database/migrations/20260927_full_workspace_upgrade.sql；旧业务数据库不可按本段旧版说明直接升级。
 ```
 
-当前项目工作区缺少文档引用的业务增量 `database/migrations/20260927_full_workspace_upgrade.sql`；应先依据目标库真实 schema 重建并审查，不可按该路径假设文件存在。IAM OIDC 纯新增迁移 `database/migrations/20260928_iam_oidc_sso.sql` 已补入，要求 `public.users.id` 为 UUID；先备份并在隔离 PostgreSQL 演练后再部署。不要对旧库运行 `init.sql`。仅在全新空库安装时使用 `init.sql`，并先在隔离数据库验证初始化顺序。
+当前项目工作区缺少文档引用的业务增量 `database/migrations/20260927_full_workspace_upgrade.sql`；应先依据目标库真实 schema 重建并审查，不可按该路径假设文件存在。不要对旧库运行 `init.sql`。仅在全新空库安装时使用 `init.sql`，并先在隔离数据库验证初始化顺序。
 
 表结构中文对照见 [`database/TABLES.md`](database/TABLES.md)。
 
@@ -229,17 +231,6 @@ npm start
 - 随机账号注册在同一事务中初始化 ¥0 钱包；首次验证邮箱时再原子发放一次 `REGISTER_GIFT`，并同步写入用户与超管流水。
 
 提交代码前阅读 [`CONTRIBUTING.md`](CONTRIBUTING.md)。输入 `--提交` 时，项目的 `commit-ai-resume` Skill 会审查当前差异、运行必要验证，并按规范创建本地提交；不会自动推送。
-
-## IAM OIDC 服务端登录
-
-新增 routers/iam.js，并由 routers/index.js 挂载。接口：GET /api/auth/iam/config、POST /api/auth/iam/login/start、GET /api/auth/iam/callback、POST /api/auth/iam/exchange、POST /api/auth/iam/link/start、GET /api/auth/iam/link/status。服务端校验 Discovery issuer、PKCE S256、回调 iss、RS256 ID Token issuer/audience/nonce/at_hash 和 RFC 7662 access token 内省；授权请求要求 `offline_access`。原始 IAM access/refresh token 只在 Node 服务处理，使用独立 `IAM_TOKEN_ENCRYPTION_KEY` 做 AES-GCM 加密保存在 `iam_oidc_sessions`；`services/iam/iamSession.service.js` 串行续期 refresh token，数据库解密失败或上游续期失败时按 fail closed 处理。state 在 HttpOnly cookie 与 5 分钟服务端记录双重绑定并单次消费；前端仅拿到 90 秒桥接码和本地会话，数据库保存桥接码摘要。
-
-部署时服务端设置 IAM_ISSUER、IAM_CLIENT_ID、IAM_CLIENT_SECRET、IAM_REDIRECT_URI 与随机 32 字节以上的 `IAM_TOKEN_ENCRYPTION_KEY`。所有密钥只从部署 Secret 管理注入，不能写进 Vue、日志或聊天；更换令牌加密密钥后旧会话密文不能解密，需让用户重新通过 IAM 登录。IAM 登记回调 URI 必须完全匹配；前后端使用同站点 HTTPS 以支持 SameSite=Lax 状态 Cookie。访问日志应脱敏回调查询参数 code、state、iss。
-
-简历 API 另使用 `IAM_RESUME_READ_PERMISSION_CODE`、`IAM_RESUME_WRITE_PERMISSION_CODE`、`IAM_RESUME_EXPORT_PERMISSION_CODE`（默认分别为 `resume.read`、`resume.write`、`resume.export`）。整个 `/api/ai/*` 路由组使用 `IAM_AI_PERMISSION_CODE`（默认 `ai.generate`）进行应用级 AI 功能授权；`/api/pdf/*` 上传并执行 AI 的路由要求 `resume.write` + `ai.generate`，读取已存文件并执行 AI 的路由要求 `resume.read` + `ai.generate`，文件元数据/内容读取要求 `resume.read`，删除要求 `resume.write`。每次真实 Provider 请求还按最终解析出的模型键检查 IAM `model.invoke` 实例权限。IAM migrations `0012_resume_permission_catalog`、`0013_ai_permission_catalog`、`0014_model_invoke_permission` 登记默认编码；本地开发 IAM 数据库 revision `0016_permission_status` 已包含 `0012`–`0015`，其它目标环境仍须按发布流程迁移。迁移不会授予任何租户角色，平台管理员需显式授权，自定义权限码也须先登记。`IAM_MODEL_ID_MAP_JSON` 是仅服务端读取的 JSON 对象，多租户时以 IAM tenant UUID 为外层 key、本地最终 `ai_model.model_key` 为内层 key，值为同租户 IAM `model_catalog.id` UUID；单租户可使用扁平 `model_key: model_uuid` 映射。已绑定 IAM 用户当前模型未映射或中心拒绝/不可用时，Provider 调用会 fail closed，且授权错误禁止 fallback。未绑定用户仍使用本地既有授权；IAM 不可用、授权路径错误不会回退到本地放行。共享 `/api/upload/file` 仍是多业务共用入口，暂不按 PDF 权限码拦截。
-
-既有数据库备份、确认 `public.users.id` 为 UUID 并在隔离库演练后，人工执行 `database/migrations/20260928_iam_oidc_sso.sql`；新库由 `database/init.sql` 创建 IAM 身份映射、授权尝试、单次登录码和加密会话四表。当前中心授权请求显式设置 `include_data_scope=false`：简历表没有 tenant/organization 列，故 IAM 只负责权限判定，数据仍由现有 `user_id = 当前本地用户` 仓储条件过滤。模型目录 `model.invoke` 已用于调用前实例判权。可选配置服务端 `IAM_MODEL_USAGE_API_KEY` 后，文本、流式、视觉和视觉流式 Provider 调用会预留并报告/结算 Token；它必须与 IAM `MODEL_USAGE_API_KEY` 相同，开发 IAM 库已包含 migration `0015_model_usage_estimation`，其它目标环境启用此字段前需先升级。IAM 配额开关默认关闭，缺少 Provider 用量字段及失败调用会标记 `usage_is_estimated`；IAM 用量服务故障会 fail closed。IAM 用量账本不替代本地钱包，Provider proxy/Secret Manager 仍未连接。上传、钱包、岗位和管理端等接口仍未接入中央权限。业务租户映射、data_scope SQL、生产迁移与完整接入尚未验收。Node 后端 `npm test` 为 14/14，其中新增 6 项覆盖中央授权守卫的身份分支、资源 ID、拒绝和错误隐藏；未验证真实 IAM、token 刷新、PostgreSQL 业务迁移或浏览器流程。
-
 
 ## AI 面试题库接口（代码已实现，联调验收中）
 

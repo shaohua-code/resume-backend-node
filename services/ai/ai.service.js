@@ -18,8 +18,6 @@ const {
   resolveModelConfig,
   resolveDeepseekFallbackConfig,
 } = require('./ai.model');
-const { requireIamModelPermission } = require('../iam/iamAuthorization.service');
-const { reserveIamModelUsage, settleIamModelUsage } = require('../iam/iamModelUsage.service');
 const { withDeepseekFallback } = require('./ai.fallback');
 const {
   hasResumeContent,
@@ -88,8 +86,7 @@ function applyRuntimeOptions(payload, runtime) {
 
 /** 从调用 options 提取温度、max_tokens、JSON 模式等可选参数 */
 function pickCallOptions(options = {}) {
-  // 用户 ID 只用于服务端 IAM 模型授权，不会进入 Provider payload。
-  const callOptions = { userId: options.userId };
+  const callOptions = {};
   if (typeof options.temperature === 'number') callOptions.temperature = options.temperature;
   if (typeof options.max_tokens === 'number') callOptions.max_tokens = options.max_tokens;
   if (options.responseFormat) callOptions.responseFormat = options.responseFormat;
@@ -102,7 +99,6 @@ function pickCallOptions(options = {}) {
  */
 async function callChatCompletion(prompt, runtime, callOptions = {}) {
   assertRuntimeConfig(runtime);
-  const iamContext = await requireIamModelPermission(callOptions.userId, runtime.modelKey);
   const headers = {
     Authorization: `Bearer ${runtime.apiKey}`,
     'Content-Type': 'application/json',
@@ -119,7 +115,6 @@ async function callChatCompletion(prompt, runtime, callOptions = {}) {
     payload.response_format = callOptions.responseFormat;
   }
   applyRuntimeOptions(payload, runtime);
-  const usageHandle = await reserveIamModelUsage(iamContext, prompt, maxTokens);
   let response;
   try {
     response = await axios.post(runtime.apiUrl, payload, {
@@ -127,14 +122,12 @@ async function callChatCompletion(prompt, runtime, callOptions = {}) {
       timeout: 60000,
     });
   } catch (error) {
-    await settleIamModelUsage(usageHandle, null, 'failed');
     throw error;
   }
   const providerUsage = response.data.usage || {};
   const usage = normalizeUsage(providerUsage);
   // 只取最终回答；思考过程在 reasoning_content，不能参与 JSON 解析
   const message = response.data.choices?.[0]?.message || {};
-  await settleIamModelUsage(usageHandle, providerUsage, 'succeeded', message.content || '');
   const cost = await calcAiCost(model, usage);
   return {
     content: message.content || '',
@@ -155,8 +148,6 @@ async function callDeepseek(prompt, options = {}) {
     },
     () => callChatCompletion(prompt, resolveDeepseekFallbackConfig(options.task), callOptions),
     {
-      // IAM 拒绝或不可用属于安全边界，不能借业务模型 fallback 换模型继续调用。
-      canFallback: (error) => !String(error?.code || '').startsWith('IAM_'),
     },
   );
 }
@@ -218,7 +209,6 @@ function consumeChatCompletionSse(responseStream, onChunk) {
  */
 async function callChatCompletionStream(prompt, runtime, onChunk, callOptions = {}, onStatus) {
   assertRuntimeConfig(runtime);
-  const iamContext = await requireIamModelPermission(callOptions.userId, runtime.modelKey);
   const headers = {
     Authorization: `Bearer ${runtime.apiKey}`,
     'Content-Type': 'application/json',
@@ -237,7 +227,6 @@ async function callChatCompletionStream(prompt, runtime, onChunk, callOptions = 
     payload.response_format = callOptions.responseFormat;
   }
   applyRuntimeOptions(payload, runtime);
-  const usageHandle = await reserveIamModelUsage(iamContext, prompt, maxTokens);
   let response;
   try {
     response = await axios.post(runtime.apiUrl, payload, {
@@ -246,26 +235,16 @@ async function callChatCompletionStream(prompt, runtime, onChunk, callOptions = 
       responseType: 'stream',
     });
   } catch (error) {
-    await settleIamModelUsage(usageHandle, null, 'failed');
     throw error;
   }
 
   // 收到 Provider 的成功响应后通知调用方；不暴露模型内部推理文本。
   onStatus?.('model', '模型已连接，正在分析简历与岗位要求');
 
-  let partialContent = '';
-  let streamResult;
-  try {
-    streamResult = await consumeChatCompletionSse(response.data, (chunk, full) => {
-      partialContent = full;
-      if (typeof onChunk === 'function') onChunk(chunk, full);
-    });
-  } catch (error) {
-    await settleIamModelUsage(usageHandle, null, 'failed', partialContent);
-    throw error;
-  }
+  const streamResult = await consumeChatCompletionSse(response.data, (chunk, full) => {
+    if (typeof onChunk === 'function') onChunk(chunk, full);
+  });
   const { content, usage, finishReason } = streamResult;
-  await settleIamModelUsage(usageHandle, usage, 'succeeded', content);
   const meta = await buildMeta(model, usage);
   return { content, finishReason, ...meta };
 }
@@ -294,8 +273,7 @@ async function callDeepseekStream(prompt, options = {}, onChunk, onStatus) {
     {
       // 已推送的半截内容无法从 SSE 客户端撤回；此时禁止拼接第二份流，
       // 继续沿用首次错误。只有首个内容片段前失败才安全兜底。
-      // IAM 授权错误不能通过 fallback 切换模型来绕过。
-      canFallback: (error) => !primaryEmittedContent && !String(error?.code || '').startsWith('IAM_'),
+      canFallback: () => !primaryEmittedContent,
     },
   );
 }
@@ -309,7 +287,6 @@ async function callDeepseekStream(prompt, options = {}, onChunk, onStatus) {
 async function callDeepseekVision(imageBuffer, mimeType, textPrompt, options = {}) {
   const runtime = await resolveModelConfig(options.task, options.model, options.userId);
   assertRuntimeConfig(runtime);
-  const iamContext = await requireIamModelPermission(options.userId, runtime.modelKey);
   const model = runtime.modelKey;
   const base64 = imageBuffer.toString('base64');
   const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${base64}`;
@@ -330,7 +307,6 @@ async function callDeepseekVision(imageBuffer, mimeType, textPrompt, options = {
     max_tokens: 4096,
   };
   applyRuntimeOptions(payload, runtime);
-  const usageHandle = await reserveIamModelUsage(iamContext, textPrompt, payload.max_tokens, imageBuffer.length);
   let response;
   try {
     response = await axios.post(runtime.apiUrl, payload, {
@@ -338,13 +314,11 @@ async function callDeepseekVision(imageBuffer, mimeType, textPrompt, options = {
       timeout: 90000,
     });
   } catch (error) {
-    await settleIamModelUsage(usageHandle, null, 'failed');
     throw error;
   }
   const providerUsage = response.data.usage || {};
   const usage = normalizeUsage(providerUsage);
   const content = response.data.choices?.[0]?.message?.content || '';
-  await settleIamModelUsage(usageHandle, providerUsage, 'succeeded', content);
   const cost = await calcAiCost(model, usage);
   return {
     content,
@@ -1349,7 +1323,6 @@ async function reviewInterviewAnswer(input, options = {}) {
 async function callDeepseekVisionStream(imageBuffer, mimeType, textPrompt, options = {}, onChunk) {
   const runtime = await resolveModelConfig(options.task, options.model, options.userId);
   assertRuntimeConfig(runtime);
-  const iamContext = await requireIamModelPermission(options.userId, runtime.modelKey);
   const model = runtime.modelKey;
   const base64 = imageBuffer.toString('base64');
   const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${base64}`;
@@ -1372,7 +1345,6 @@ async function callDeepseekVisionStream(imageBuffer, mimeType, textPrompt, optio
     stream_options: { include_usage: true },
   };
   applyRuntimeOptions(payload, runtime);
-  const usageHandle = await reserveIamModelUsage(iamContext, textPrompt, payload.max_tokens, imageBuffer.length);
   let response;
   try {
     response = await axios.post(runtime.apiUrl, payload, {
@@ -1381,24 +1353,14 @@ async function callDeepseekVisionStream(imageBuffer, mimeType, textPrompt, optio
       responseType: 'stream',
     });
   } catch (error) {
-    await settleIamModelUsage(usageHandle, null, 'failed');
     throw error;
   }
 
   // 与文本流共用安全解码，避免视觉流中文同样被截成乱码
-  let partialContent = '';
-  let streamResult;
-  try {
-    streamResult = await consumeChatCompletionSse(response.data, (chunk, full) => {
-      partialContent = full;
-      if (typeof onChunk === 'function') onChunk(chunk, full);
-    });
-  } catch (error) {
-    await settleIamModelUsage(usageHandle, null, 'failed', partialContent);
-    throw error;
-  }
+  const streamResult = await consumeChatCompletionSse(response.data, (chunk, full) => {
+    if (typeof onChunk === 'function') onChunk(chunk, full);
+  });
   const { content, usage } = streamResult;
-  await settleIamModelUsage(usageHandle, usage, 'succeeded', content);
   const meta = await buildMeta(model, usage);
   return { content, ...meta };
 }

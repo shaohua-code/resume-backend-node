@@ -6,7 +6,6 @@
 
 const express = require('express')
 const { authRequired, emailBindingRequired } = require('../middlewares/auth')
-const { iamAuthorizationRequired } = require('../middlewares/iamAuthorization')
 const { validate } = require('../middlewares/validate')
 const aiController = require('../controllers/ai.controller')
 const aiValidator = require('../validators/ai.validator')
@@ -16,8 +15,6 @@ const router = express.Router()
 // 所有 AI 接口必须先登录，再由服务端确认当前账号已绑定并验证邮箱。
 router.use(authRequired)
 router.use(emailBindingRequired)
-// 已绑定 IAM 的用户还必须拥有 AI 功能权限；未绑定账户维持本地 RBAC 兼容路径。
-router.use(iamAuthorizationRequired('ai'))
 
 /**
  * AI 生成简历（同步）

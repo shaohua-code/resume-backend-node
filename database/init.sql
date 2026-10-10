@@ -97,54 +97,7 @@ CREATE TABLE IF NOT EXISTS public.extension_auth_code (
 );
 CREATE INDEX IF NOT EXISTS idx_extension_auth_code_user ON public.extension_auth_code(user_id, expires_at DESC);
 
--- IAM OIDC 绑定只记录不透明 subject；不按邮箱归并业务账号。
-CREATE TABLE IF NOT EXISTS public.iam_identity_links (
-  issuer TEXT NOT NULL,
-  subject TEXT NOT NULL,
-  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (issuer, subject),
-  UNIQUE (issuer, user_id)
-);
-CREATE INDEX IF NOT EXISTS iam_identity_links_user_id_idx ON public.iam_identity_links(user_id);
 
--- 中心 access/refresh token 使用 AES-256-GCM 密文保存，并随身份解绑级联清除。
-CREATE TABLE IF NOT EXISTS public.iam_oidc_sessions (
-  issuer TEXT NOT NULL,
-  subject TEXT NOT NULL,
-  tenant_id TEXT NOT NULL,
-  access_token_ciphertext TEXT NOT NULL,
-  refresh_token_ciphertext TEXT NOT NULL,
-  access_expires_at TIMESTAMPTZ NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (issuer, subject),
-  FOREIGN KEY (issuer, subject)
-    REFERENCES public.iam_identity_links(issuer, subject) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS iam_oidc_sessions_expiry_idx
-  ON public.iam_oidc_sessions(access_expires_at);
-
--- OIDC 回调状态保存于服务端并在回调时原子消费，有效期仅 5 分钟。
-CREATE TABLE IF NOT EXISTS public.iam_oidc_attempts (
-  state_hash CHAR(64) PRIMARY KEY,
-  nonce TEXT NOT NULL,
-  code_verifier TEXT NOT NULL,
-  intent TEXT NOT NULL CHECK (intent IN ('login', 'link')),
-  local_user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  expires_at TIMESTAMPTZ NOT NULL
-);
-CREATE INDEX IF NOT EXISTS iam_oidc_attempts_expires_at_idx ON public.iam_oidc_attempts(expires_at);
-
--- 浏览器只能兑换短时单次码，IAM token pair 由后端单独以密文保管。
-CREATE TABLE IF NOT EXISTS public.iam_login_codes (
-  code_hash CHAR(64) PRIMARY KEY,
-  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  expires_at TIMESTAMPTZ NOT NULL
-);
-CREATE INDEX IF NOT EXISTS iam_login_codes_expires_at_idx ON public.iam_login_codes(expires_at);
 CREATE TABLE IF NOT EXISTS public.extension_saved_job (
   id BIGSERIAL PRIMARY KEY,
   user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,

@@ -1,6 +1,6 @@
 # 数据库表中文对照
 
-全新安装以 [`init.sql`](init.sql) 为结构权威来源；当前共 **42 张表**。题库一次性升级入口为 [`20261002_interview_question_bank_complete.sql`](migrations/20261002_interview_question_bank_complete.sql)，包含套题、题目、练习、异步生成任务和回答点评共 5 张表，并会同步任务模型与提示词。已于 2026-10-02 在本地 `ai_resume` 执行成功，核验 5 张题库表及两项任务模型/提示词配置；脚本还包含基础表检查、重复数据预检和事务保护。当前工作区缺少既有业务升级 `20260927_full_workspace_upgrade.sql`，不得据旧文档升级其他业务 schema。IAM OIDC 既有库增量 [`20260928_iam_oidc_sso.sql`](migrations/20260928_iam_oidc_sso.sql) 尚未在隔离 PostgreSQL 演练。
+全新安装以 [`init.sql`](init.sql) 为结构权威来源；当前共 **38 张表**。题库一次性升级入口为 [`20261002_interview_question_bank_complete.sql`](migrations/20261002_interview_question_bank_complete.sql)，包含套题、题目、练习、异步生成任务和回答点评共 5 张表，并会同步任务模型与提示词。已于 2026-10-02 在本地 `ai_resume` 执行成功，核验 5 张题库表及两项任务模型/提示词配置；脚本还包含基础表检查、重复数据预检和事务保护。当前工作区缺少既有业务升级 `20260927_full_workspace_upgrade.sql`，不得据旧文档升级其他业务 schema。
 
 验证表数量：
 
@@ -42,43 +42,6 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | 关联 | `user_id` → `users.id`（CASCADE） |
 | 轮换规则 | refresh token 一次性原子消费；记录版本必须与 `users.session_version` 相同，否则拒绝轮换 |
 | 代码路径 | lib/jwt.js |
-
-### iam_identity_links — IAM 身份绑定表
-
-| 项 | 说明 |
-|---|---|
-| 主键 | (issuer, subject) |
-| 核心字段 | user_id、created_at |
-| 约束 | 每个 issuer/subject 只能显式关联一个本地 UUID；每个本地账号在同一 issuer 下最多关联一个身份；不按邮箱自动合并 |
-| 代码路径 | routers/iam.js |
-
-### iam_oidc_sessions — IAM 服务端令牌会话表
-
-| 项 | 说明 |
-|---|---|
-| 主键 | (issuer, subject)，并通过外键绑定 `iam_identity_links` |
-| 核心字段 | `tenant_id`、`access_token_ciphertext`、`refresh_token_ciphertext`、`access_expires_at` |
-| 安全 | access/refresh token 以独立 `IAM_TOKEN_ENCRYPTION_KEY` 使用 AES-GCM 加密；数据库不保存令牌明文，密钥不进入前端或日志 |
-| 生命周期 | 登录或显式身份绑定时更新；服务端续期时锁行串行轮换；删除身份映射时级联清理 |
-| 代码路径 | `services/iam/iamSession.service.js`、`routers/iam.js` |
-
-### iam_oidc_attempts — OIDC 授权尝试表
-
-| 项 | 说明 |
-|---|---|
-| 主键 | state_hash |
-| 核心字段 | nonce、code_verifier、intent、local_user_id、expires_at |
-| 生命周期 | 5 分钟到期；回调以 state hash 原子删除后才兑换授权码，过期尝试由新登录请求清理 |
-| 代码路径 | routers/iam.js |
-
-### iam_login_codes — IAM 单次登录兑换码表
-
-| 项 | 说明 |
-|---|---|
-| 主键 | code_hash |
-| 核心字段 | user_id、created_at、expires_at |
-| 生命周期 | 90 秒有效；前端兑换时原子删除；数据库只存 SHA-256 摘要 |
-| 代码路径 | routers/iam.js |
 
 ---
 
@@ -396,10 +359,9 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 
 | 脚本 | 用途 |
 |---|---|
-| [`init.sql`](init.sql) | 全新安装结构权威来源（42 张表） |
+| [`init.sql`](init.sql) | 全新安装结构权威来源（38 张表） |
 | [`migrations/20261002_interview_question_bank_complete.sql`](migrations/20261002_interview_question_bank_complete.sql) | 面试题库单文件升级入口（5 张表及 AI 任务配置）；本地 ai_resume 已执行并验证 |
 | `migrations/20260927_full_workspace_upgrade.sql` | 当前工作区缺失；重建并按目标 schema 隔离验证前禁止对既有数据库升级 |
-| [`migrations/20260928_iam_oidc_sso.sql`](migrations/20260928_iam_oidc_sso.sql) | IAM 身份/尝试/桥接码/加密 session 纯新增表；人工执行，未在 PostgreSQL 演练 |
 | `migrations/20260926_career_goals.sql`、`20260927_retention_workspace.sql` | 原分项迁移来源，保留用于追溯；执行统一入口后不要再次单独运行 |
 
 ---

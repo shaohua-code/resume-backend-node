@@ -14,7 +14,6 @@
 
 const express = require('express');
 const { authRequired } = require('../middlewares/auth');
-const { iamAuthorizationRequired } = require('../middlewares/iamAuthorization');
 const { validate } = require('../middlewares/validate');
 const resumeController = require('../controllers/resume.controller');
 const resumeValidator = require('../validators/resume.validator');
@@ -29,71 +28,71 @@ router.use(authRequired);
  * AI 生成、上传优化、首次保存时使用，仅做 insert
  * POST /api/resume/create
  */
-router.post('/create', iamAuthorizationRequired('write'), resumeValidator.create, validate, resumeController.create);
+router.post('/create', resumeValidator.create, validate, resumeController.create);
 
 /**
  * 更新简历接口
  * id 必传，仅做 update
  * PUT /api/resume/update/:id
  */
-router.put('/update/:id', iamAuthorizationRequired('write'), resumeValidator.update, validate, resumeController.update);
+router.put('/update/:id', resumeValidator.update, validate, resumeController.update);
 
 /**
  * 保存简历接口（兼容旧调用）
  * 如果传了 id 则更新已有简历，否则创建新简历
  * POST /api/resume/save
  */
-router.post('/save', iamAuthorizationRequired('write'), resumeValidator.save, validate, resumeController.save);
+router.post('/save', resumeValidator.save, validate, resumeController.save);
 
 /**
  * 获取简历列表接口
  * 分页返回当前用户的所有简历
  * GET /api/resume/list
  */
-router.get('/list', iamAuthorizationRequired('read'), resumeController.list);
+router.get('/list', resumeController.list);
 
 /**
  * 获取简历详情接口
  * GET /api/resume/detail
  */
-router.get('/detail', iamAuthorizationRequired('read'), resumeValidator.detail, validate, resumeController.detail);
+router.get('/detail', resumeValidator.detail, validate, resumeController.detail);
 
 /**
  * 获取某份简历最近 3 条 AI 生成/优化历史
  * GET /api/resume/:id/history
  */
-router.get('/:id/history', iamAuthorizationRequired('read'), resumeValidator.history, validate, resumeController.history);
+router.get('/:id/history', resumeValidator.history, validate, resumeController.history);
 
 /**
  * 将历史版本应用到当前简历
  * POST /api/resume/:id/history/:historyId/apply
  */
-router.post('/:id/history/:historyId/apply', iamAuthorizationRequired('write'), resumeValidator.applyHistory, validate, resumeController.applyHistory);
+router.post('/:id/history/:historyId/apply', resumeValidator.applyHistory, validate, resumeController.applyHistory);
 
 /**
  * 删除简历接口
  * 仅能删除自己的简历
  * DELETE /api/resume/delete
  */
-router.delete('/delete', iamAuthorizationRequired('write'), resumeValidator.remove, validate, resumeController.remove);
+router.delete('/delete', resumeValidator.remove, validate, resumeController.remove);
 
 /**
  * 批量删除简历接口
  * POST /api/resume/batch-delete
  * body: { ids: [id1, id2, ...] }
  */
-router.post('/batch-delete', iamAuthorizationRequired('write'), resumeValidator.batchRemove, validate, resumeController.batchRemove);
+router.post('/batch-delete', resumeValidator.batchRemove, validate, resumeController.batchRemove);
 
 /**
  * 获取当前用户简历数量与上限
  * GET /api/resume/count
  */
-router.get('/count', iamAuthorizationRequired('read'), resumeController.count);
+router.get('/count', resumeController.count);
 
 /**
  * 记录导出操作接口
  * POST /api/resume/export
  */
-router.post('/export', iamAuthorizationRequired('export'), resumeValidator.recordExport, validate, resumeController.recordExport);
+router.post('/export', resumeValidator.recordExport, validate, resumeController.recordExport);
 
 module.exports = router;
