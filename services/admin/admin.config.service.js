@@ -5,6 +5,11 @@
 
 const configRepo = require('../../repositories/config.repository');
 const { logAdminAction } = require('./admin.common.service');
+const {
+  CONFIG_KEY: DEFAULT_TEMPLATE_CONFIG_KEY,
+  validateDefaultTemplateConfigValue,
+  invalidateDefaultTemplateCache,
+} = require('../system/defaultTemplate.service');
 
 /**
  * 查询所有系统配置
@@ -26,9 +31,14 @@ async function listConfigs() {
  * @returns {Promise<Object>} 保存后的配置数据
  */
 async function upsertConfig(req) {
+  const configKey = req.params.key;
+  let configValue = req.body.config_value || {};
+  if (configKey === DEFAULT_TEMPLATE_CONFIG_KEY) {
+    configValue = validateDefaultTemplateConfigValue(configValue);
+  }
   const payload = {
-    config_key: req.params.key,
-    config_value: req.body.config_value || {},
+    config_key: configKey,
+    config_value: configValue,
     description: req.body.description || '',
     update_time: new Date().toISOString(),
   };
@@ -39,7 +49,10 @@ async function upsertConfig(req) {
     throw Object.assign(new Error(`保存配置失败：${error.message}`), { statusCode: 500 });
   }
 
-  await logAdminAction(req, 'upsert_config', 'system_config', req.params.key);
+  if (configKey === DEFAULT_TEMPLATE_CONFIG_KEY) {
+    invalidateDefaultTemplateCache();
+  }
+  await logAdminAction(req, 'upsert_config', 'system_config', configKey);
   return data;
 }
 

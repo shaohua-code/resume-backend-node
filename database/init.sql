@@ -713,7 +713,8 @@ VALUES
   ('recharge_email_user_confirm', '{"subject":"【AI简历】充值已到账","html":"","text":""}'::jsonb, '管理员确认充值后通知用户的邮件模板'),
   -- 超级管理员开启后，普通用户才可在 /user 按任务选择模型 / 编辑提示词指令段
   ('user_ai_model_customization', '{"enabled": false}'::jsonb, '是否允许用户自定义各 AI 任务模型（仅选择，不配置密钥）'),
-  ('user_ai_prompt_customization', '{"enabled": false}'::jsonb, '是否允许用户自定义各 AI 任务业务提示词（不含输出格式）')
+  ('user_ai_prompt_customization', '{"enabled": false}'::jsonb, '是否允许用户自定义各 AI 任务业务提示词（不含输出格式）'),
+  ('default_template_id', '{"id": 56}'::jsonb, '新建简历默认模板 ID（1–60，仅超级管理员可改）')
 ON CONFLICT (config_key) DO NOTHING;
 
 -- ========== 用户级 AI 任务模型覆盖（隔离；无覆盖则用全局 ai_task_model） ==========

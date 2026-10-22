@@ -14,6 +14,14 @@ async function listConfigs() {
 }
 
 /**
+ * 按配置键读取单条系统配置
+ * @param {string} configKey
+ */
+async function getConfigByKey(configKey) {
+  return dbAdmin.from('system_config').select('*').eq('config_key', configKey).maybeSingle();
+}
+
+/**
  * 新增或更新系统配置
  * @param {Object} payload - 配置数据
  * @returns {Promise<Object>} PostgreSQL 查询结果 { data, error }
@@ -24,5 +32,6 @@ async function upsertConfig(payload) {
 
 module.exports = {
   listConfigs,
+  getConfigByKey,
   upsertConfig,
 };

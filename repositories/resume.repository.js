@@ -5,8 +5,11 @@
 
 const { dbAdmin } = require('../dbClient');
 const db = require('../lib/db');
-const DEFAULT_TEMPLATE_ID = 56;
-const MAX_TEMPLATE_ID = 60;
+const {
+  getDefaultTemplateId,
+  FALLBACK_TEMPLATE_ID,
+  MAX_TEMPLATE_ID,
+} = require('../services/system/defaultTemplate.service');
 
 function serializeResumeJson(resumeJson) {
   if (typeof resumeJson === 'object' && resumeJson !== null) {
@@ -15,19 +18,21 @@ function serializeResumeJson(resumeJson) {
   return resumeJson || '{}';
 }
 
-// API 的模板号限制在注册表的有效范围，缺失或越界时与前端采用相同默认款。
-function normalizeTemplateId(value) {
+// API 的模板号限制在注册表的有效范围，缺失或越界时回退到后台配置的默认款。
+function normalizeTemplateId(value, defaultTemplateId) {
+  const fallback = Number(defaultTemplateId) || FALLBACK_TEMPLATE_ID;
   const id = Number(value);
-  return Number.isInteger(id) && id >= 1 && id <= MAX_TEMPLATE_ID ? id : DEFAULT_TEMPLATE_ID;
+  return Number.isInteger(id) && id >= 1 && id <= MAX_TEMPLATE_ID ? id : fallback;
 }
 
-function buildResumePayload(body) {
+async function buildResumePayload(body) {
+  const defaultTemplateId = await getDefaultTemplateId();
   const { title, resume_json, template_id, score } = body || {};
   return {
     title: title || '未命名简历',
     resume_json: serializeResumeJson(resume_json),
-    // 有效模板 ID 原样持久化，缺失或无效值回退到与前端一致的默认款。
-    template_id: normalizeTemplateId(template_id),
+    // 有效模板 ID 原样持久化，缺失或无效值回退到 system_config 默认款。
+    template_id: normalizeTemplateId(template_id, defaultTemplateId),
     score: score || 0,
   };
 }
@@ -42,7 +47,7 @@ async function createResume(userId, body) {
   const now = new Date().toISOString();
   const payload = {
     user_id: userId,
-    ...buildResumePayload(body),
+    ...(await buildResumePayload(body)),
     client_request_id: getClientRequestId(body),
     create_time: now,
     update_time: now,
@@ -93,7 +98,7 @@ async function createWithinLimit(userId, body, maxCount) {
       );
     }
 
-    const payload = buildResumePayload(body);
+    const payload = await buildResumePayload(body);
     const { rows } = await client.query(
       `INSERT INTO public.resume (
         user_id, title, resume_json, template_id, score, client_request_id, create_time, update_time
@@ -114,7 +119,7 @@ async function createWithinLimit(userId, body, maxCount) {
 
 async function updateResume(userId, resumeId, body) {
   const payload = {
-    ...buildResumePayload(body),
+    ...(await buildResumePayload(body)),
     update_time: new Date().toISOString(),
   };
   return dbAdmin
@@ -130,7 +135,7 @@ async function createHistory(userId, resumeId, body, sourceType) {
   const payload = {
     resume_id: resumeId,
     user_id: userId,
-    ...buildResumePayload(body),
+    ...(await buildResumePayload(body)),
     // 历史类型只记录 AI 生成/优化来源，便于前端展示而不参与权限判断。
     source_type: sourceType || 'ai_optimize',
     create_time: new Date().toISOString(),

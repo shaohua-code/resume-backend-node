@@ -18,6 +18,7 @@ const userRouter = require('./user')
 const extensionRouter = require('./extension')
 const productEventsRouter = require('./productEvents')
 const workspaceRouter = require('./workspace')
+const appRouter = require('./app')
 
 const router = express.Router()
 
@@ -35,5 +36,6 @@ router.use('/user', userRouter)
 router.use('/extension', extensionRouter)
 router.use('/product-events', productEventsRouter)
 router.use('/workspace', workspaceRouter)
+router.use('/app', appRouter)
 
 module.exports = router
