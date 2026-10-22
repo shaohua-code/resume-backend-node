@@ -90,13 +90,6 @@ function getModelPriceBaseline(model = {}) {
 }
 
 function getProviderDefaults(provider) {
-  if (provider === 'dashscope') {
-    return {
-      apiKey: (settings.DASHSCOPE_API_KEY || '').trim(),
-      apiUrl: settings.DASHSCOPE_API_URL,
-      apiKeyEnv: 'DASHSCOPE_API_KEY',
-    };
-  }
   if (provider === 'deepseek') {
     return {
       apiKey: (settings.DEEPSEEK_API_KEY || '').trim(),
@@ -127,12 +120,9 @@ function toRuntime(model) {
 }
 
 function getLegacyModelKey(task) {
-  // 视觉任务仅在 DashScope 密钥存在时使用 Qwen；否则回退 DeepSeek 的视觉模型配置。
+  // JD 图片识别统一走 DeepSeek 视觉模型（与 DEEPSEEK_API_KEY 共用）
   if (task === AI_TASK.JD_IMAGE_EXTRACT) {
-    if ((settings.DASHSCOPE_API_KEY || '').trim()) {
-      return String(settings.DASHSCOPE_MODEL_VISION || 'qwen3.6-flash').trim();
-    }
-    return String(settings.DEEPSEEK_MODEL_VISION || settings.DEEPSEEK_MODEL || 'deepseek-v4-flash').trim();
+    return String(settings.DEEPSEEK_MODEL_VISION || 'deepseek-flash').trim();
   }
   const modelMap = {
     [AI_TASK.RESUME_GENERATE]: settings.DEEPSEEK_MODEL_RESUME_GENERATE,
@@ -154,14 +144,15 @@ function getLegacyModelKey(task) {
 
 function buildLegacyRuntime(task, requestedModel = '') {
   const modelKey = String(requestedModel || getLegacyModelKey(task)).trim();
-  const useDashscope = task === AI_TASK.JD_IMAGE_EXTRACT && Boolean((settings.DASHSCOPE_API_KEY || '').trim());
-  const provider = useDashscope ? 'dashscope' : 'deepseek';
-  return toRuntime({
+  const runtime = toRuntime({
     model_key: modelKey,
     name: modelKey,
-    provider,
+    provider: 'deepseek',
     model_type: getTaskDefinition(task)?.required_model_type || AI_MODEL_TYPE.TEXT,
+    // JD 识图关闭思考，避免占满 max_tokens 导致 OCR 正文被截断
+    thinking_enabled: task === AI_TASK.JD_IMAGE_EXTRACT ? false : undefined,
   });
+  return runtime;
 }
 
 /**
@@ -176,8 +167,8 @@ function resolveDeepseekFallbackConfig(task) {
     provider: 'deepseek',
     model_type: getTaskDefinition(task)?.required_model_type || AI_MODEL_TYPE.TEXT,
   });
-  // DeepSeek V4 默认开思考；识别兜底强制关闭，避免思考占满 max_tokens 导致 JSON 截断
-  if (task === AI_TASK.RESUME_EXTRACT) {
+  // DeepSeek V4 默认开思考；纯提取/OCR 兜底强制关闭，避免思考占满 max_tokens
+  if (task === AI_TASK.RESUME_EXTRACT || task === AI_TASK.JD_IMAGE_EXTRACT) {
     runtime.thinkingEnabled = false;
   }
   return runtime;
@@ -277,6 +268,9 @@ async function resolveModelConfig(task, requestedModel = '', userId = '') {
   // 任务级开关优先于模型默认，仅 boolean 时覆盖
   if (typeof taskThinkingEnabled === 'boolean') {
     runtime.thinkingEnabled = taskThinkingEnabled;
+  } else if (task === AI_TASK.JD_IMAGE_EXTRACT && runtime.thinkingEnabled !== false) {
+    // 未在任务映射显式配置时，JD 识图默认不开启思考
+    runtime.thinkingEnabled = false;
   }
   if (taskDefinition && runtime.modelType !== taskDefinition.required_model_type) {
     const err = new Error(`任务 ${taskDefinition.name} 需要${taskDefinition.required_model_type === AI_MODEL_TYPE.VISION ? '视觉' : '文本'}模型`);

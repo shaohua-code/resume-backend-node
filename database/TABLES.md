@@ -131,6 +131,7 @@ SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';
 | 主键 | `id` (BIGSERIAL) |
 | 核心字段 | `name`、`model_key`（唯一）、`provider`、`model_type`、`api_url`、`api_key_env`、输入/缓存输入/输出单价、`thinking_enabled`、`enabled` |
 | 关联 | 按 `model_key` 被计费逻辑引用；被 `ai_task_model.model_id` 引用 |
+| 种子模型 | `deepseek-v4-flash`（text）、`deepseek-flash`（vision，`jd_image_extract`）；`init.sql` 幂等删除 `provider=dashscope` 及 `qwen3.6-flash` 行 |
 | 代码路径 | `utils/ai_cost.js`、`services/ai/ai.model.js`、`services/admin/admin.aiModel.service.js` |
 
 ### ai_task_model — AI 任务模型映射表

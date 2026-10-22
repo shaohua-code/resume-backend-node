@@ -155,14 +155,11 @@ SMTP_PORT=465
 SMTP_USER=your@qq.com
 SMTP_PASS=授权码
 
-# DeepSeek
+# DeepSeek（文本 + JD 图片识图多模态）
 DEEPSEEK_API_KEY=your-deepseek-api-key
 DEEPSEEK_API_URL=https://api.deepseek.com/v1/chat/completions
-
-# 阿里云百炼 Qwen 视觉模型
-DASHSCOPE_API_KEY=your-dashscope-api-key
-DASHSCOPE_API_URL=https://your-workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions
-DASHSCOPE_MODEL_VISION=qwen3.6-flash
+# 可选：覆盖 JD 图片任务视觉模型（默认 deepseek-flash）
+DEEPSEEK_MODEL_VISION=deepseek-flash
 
 # 上传目录（生产建议 /var/www/resume-uploads）
 UPLOAD_DIR=/var/www/resume-uploads

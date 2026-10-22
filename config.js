@@ -38,12 +38,8 @@ const settings = {
   DEEPSEEK_MODEL_PDF_OPTIMIZE: process.env.DEEPSEEK_MODEL_PDF_OPTIMIZE || '',
   // JD 岗位描述流式优化简历（缺省复用 PDF 优化模型）
   DEEPSEEK_MODEL_JD_RESUME_OPTIMIZE: process.env.DEEPSEEK_MODEL_JD_RESUME_OPTIMIZE || '',
-  // JD 图片 OCR 提取（多模态视觉模型）
-  DEEPSEEK_MODEL_VISION: process.env.DEEPSEEK_MODEL_VISION || '',
-  // 阿里云 DashScope 视觉模型（用于 JD 图片 OCR 识别，优先于 DeepSeek）
-  DASHSCOPE_API_KEY: process.env.DASHSCOPE_API_KEY || '',
-  DASHSCOPE_API_URL: process.env.DASHSCOPE_API_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
-  DASHSCOPE_MODEL_VISION: process.env.DASHSCOPE_MODEL_VISION || 'qwen3.6-flash',
+  // JD 图片 OCR 提取（DeepSeek 多模态，官方 Vision 模型名 deepseek-flash）
+  DEEPSEEK_MODEL_VISION: process.env.DEEPSEEK_MODEL_VISION || 'deepseek-flash',
 
   CORS_ORIGINS: (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:3000')
     .split(',')

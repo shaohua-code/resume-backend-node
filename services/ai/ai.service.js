@@ -70,8 +70,7 @@ function assertRuntimeConfig(runtime) {
 
 /**
  * 按供应商写入深度思考开关。
- * DeepSeek V4 默认开启思考，必须用 thinking.type；enable_thinking 对其无效。
- * DashScope 等兼容接口继续使用 enable_thinking。
+ * DeepSeek 使用 thinking.type；其它 OpenAI 兼容接口使用 enable_thinking。
  */
 function applyRuntimeOptions(payload, runtime) {
   if (typeof runtime.thinkingEnabled !== 'boolean') return payload;

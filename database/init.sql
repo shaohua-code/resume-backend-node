@@ -870,7 +870,7 @@ INSERT INTO public.ai_model (
 VALUES
   ('DeepSeek V4 Flash', 'deepseek-v4-flash', 'all', 'deepseek', 'text', 'DEEPSEEK_API_KEY', 1.0, 0.1, 2.0, 1.0, 0.1, 2.0, NULL, true),
   ('DeepSeek Chat (legacy alias)', 'deepseek-chat', 'all', 'deepseek', 'text', 'DEEPSEEK_API_KEY', 1.0, 0.1, 2.0, 1.0, 0.1, 2.0, NULL, false),
-  ('Qwen3.6 Flash Vision', 'qwen3.6-flash', 'all', 'dashscope', 'vision', 'DASHSCOPE_API_KEY', 1.2, 0.12, 7.2, 1.2, 0.12, 7.2, false, true)
+  ('DeepSeek Flash Vision', 'deepseek-flash', 'all', 'deepseek', 'vision', 'DEEPSEEK_API_KEY', 1.0, 0.1, 2.0, 1.0, 0.1, 2.0, false, true)
 ON CONFLICT (model_key) DO UPDATE SET
   input_price_per_million = EXCLUDED.input_price_per_million,
   cached_input_price_per_million = EXCLUDED.cached_input_price_per_million,
@@ -900,7 +900,37 @@ FROM (VALUES
   ('pdf_optimize', 'text', 'deepseek-v4-flash'),
   ('jd_resume_optimize', 'text', 'deepseek-v4-flash'),
   ('pdf_jd_optimize', 'text', 'deepseek-v4-flash'),
-  ('jd_image_extract', 'vision', 'qwen3.6-flash')
+  ('jd_image_extract', 'vision', 'deepseek-flash')
 ) AS task(task_type, required_model_type, model_key)
 JOIN public.ai_model model ON model.model_key = task.model_key
 ON CONFLICT (task_type) DO NOTHING;
+
+-- JD 识图改绑 DeepSeek 视觉模型，并删除 DashScope/Qwen 模型行（已有库幂等）
+UPDATE public.ai_task_model task_map
+SET model_id = vision_model.id,
+    required_model_type = 'vision',
+    thinking_enabled = false,
+    update_time = now()
+FROM public.ai_model vision_model
+WHERE task_map.task_type = 'jd_image_extract'
+  AND vision_model.model_key = 'deepseek-flash';
+
+UPDATE public.ai_task_model task_map
+SET model_id = vision_model.id,
+    update_time = now()
+FROM public.ai_model vision_model, public.ai_model legacy
+WHERE vision_model.model_key = 'deepseek-flash'
+  AND legacy.id = task_map.model_id
+  AND (legacy.provider = 'dashscope' OR legacy.model_key = 'qwen3.6-flash');
+
+UPDATE public.user_ai_task_model user_map
+SET model_id = vision_model.id,
+    update_time = now()
+FROM public.ai_model vision_model
+WHERE vision_model.model_key = 'deepseek-flash'
+  AND user_map.model_id IN (
+    SELECT id FROM public.ai_model WHERE provider = 'dashscope' OR model_key = 'qwen3.6-flash'
+  );
+
+DELETE FROM public.ai_model
+WHERE provider = 'dashscope' OR model_key = 'qwen3.6-flash';
