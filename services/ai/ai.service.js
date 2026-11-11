@@ -13,6 +13,7 @@ const axios = require('axios');
 const { StringDecoder } = require('string_decoder');
 const { calcAiCost, normalizeUsage } = require('../../utils/ai_cost');
 const { extractJson, extractJsonSafe } = require('../../utils/extractJson');
+const { withRetry, isRetryableError, AI_RETRY_CONFIG } = require('../../utils/retry');
 const {
   AI_TASK,
   resolveModelConfig,
@@ -94,6 +95,7 @@ function pickCallOptions(options = {}) {
 
 /**
  * OpenAI Chat Completions 兼容接口通用方法（历史函数名保留为内部兼容）。
+ * 支持可配置的超时和自动重试（仅对临时性网络错误重试）。
  * @returns {Promise<{ content: string, usage: object, model: string, cost: number }>}
  */
 async function callChatCompletion(prompt, runtime, callOptions = {}) {
@@ -104,6 +106,8 @@ async function callChatCompletion(prompt, runtime, callOptions = {}) {
   };
   const model = runtime.modelKey;
   const maxTokens = typeof callOptions.max_tokens === 'number' ? callOptions.max_tokens : 4096;
+  // 支持可配置超时，默认 60 秒
+  const timeout = typeof callOptions.timeout === 'number' ? callOptions.timeout : 60000;
   const payload = {
     model,
     messages: [{ role: 'user', content: prompt }],
@@ -114,15 +118,32 @@ async function callChatCompletion(prompt, runtime, callOptions = {}) {
     payload.response_format = callOptions.responseFormat;
   }
   applyRuntimeOptions(payload, runtime);
-  let response;
-  try {
-    response = await axios.post(runtime.apiUrl, payload, {
+
+  // 使用重试包装器执行请求
+  const executeRequest = async () => {
+    const response = await axios.post(runtime.apiUrl, payload, {
       headers,
-      timeout: 60000,
+      timeout,
     });
-  } catch (error) {
-    throw error;
+    return response;
+  };
+
+  // 根据配置决定是否启用重试
+  const enableRetry = callOptions.enableRetry !== false;
+  let response;
+
+  if (enableRetry) {
+    response = await withRetry(executeRequest, {
+      ...AI_RETRY_CONFIG,
+      // 重试回调：记录重试日志（生产环境可接入监控）
+      onRetry: ({ error, attempt, delay }) => {
+        console.warn(`[AI 调用重试] 模型=${model}, 尝试=${attempt}, 延迟=${delay}ms, 错误=${error.code || error.message}`);
+      },
+    });
+  } else {
+    response = await executeRequest();
   }
+
   const providerUsage = response.data.usage || {};
   const usage = normalizeUsage(providerUsage);
   // 只取最终回答；思考过程在 reasoning_content，不能参与 JSON 解析
@@ -204,6 +225,7 @@ function consumeChatCompletionSse(responseStream, onChunk) {
 
 /**
  * 流式调用 OpenAI 兼容接口，通过 onChunk 回调推送增量文本。
+ * 支持连接阶段的自动重试（流开始后不重试，避免重复推送）。
  * @returns {Promise<{ content: string, usage: object, model: string, cost: number }>}
  */
 async function callChatCompletionStream(prompt, runtime, onChunk, callOptions = {}, onStatus) {
@@ -214,6 +236,8 @@ async function callChatCompletionStream(prompt, runtime, onChunk, callOptions = 
   };
   const model = runtime.modelKey;
   const maxTokens = typeof callOptions.max_tokens === 'number' ? callOptions.max_tokens : 4096;
+  // 支持可配置超时，默认 120 秒（流式调用需要更长时间）
+  const timeout = typeof callOptions.timeout === 'number' ? callOptions.timeout : 120000;
   const payload = {
     model,
     messages: [{ role: 'user', content: prompt }],
@@ -226,15 +250,34 @@ async function callChatCompletionStream(prompt, runtime, onChunk, callOptions = 
     payload.response_format = callOptions.responseFormat;
   }
   applyRuntimeOptions(payload, runtime);
-  let response;
-  try {
-    response = await axios.post(runtime.apiUrl, payload, {
+
+  // 通知正在连接模型
+  onStatus?.('connecting', '正在连接 AI 模型...');
+
+  // 建立连接的请求函数
+  const establishConnection = async () => {
+    const response = await axios.post(runtime.apiUrl, payload, {
       headers,
-      timeout: 120000,
+      timeout,
       responseType: 'stream',
     });
-  } catch (error) {
-    throw error;
+    return response;
+  };
+
+  // 连接阶段支持重试
+  const enableRetry = callOptions.enableRetry !== false;
+  let response;
+
+  if (enableRetry) {
+    response = await withRetry(establishConnection, {
+      ...AI_RETRY_CONFIG,
+      onRetry: ({ error, attempt, delay }) => {
+        console.warn(`[AI 流式调用重试] 模型=${model}, 尝试=${attempt}, 延迟=${delay}ms, 错误=${error.code || error.message}`);
+        onStatus?.('connecting', `连接中断，正在重试（第 ${attempt} 次）...`);
+      },
+    });
+  } else {
+    response = await establishConnection();
   }
 
   // 收到 Provider 的成功响应后通知调用方；不暴露模型内部推理文本。
@@ -921,8 +964,12 @@ async function generateResume(userInput, options = {}) {
 /**
  * 流式 AI 生成简历
  * 统一返回 { resume, optimization_notes }，亮点由模型总结；缺失时后端兜底
+ * @param {string|object} userInput 用户输入
+ * @param {object} options 配置选项
+ * @param {Function} onChunk 内容片段回调
+ * @param {Function} onStatus 状态回调（可选）
  */
-async function generateResumeStream(userInput, options = {}, onChunk) {
+async function generateResumeStream(userInput, options = {}, onChunk, onStatus) {
   const prompt = await resolveGeneratePrompt(userInput, options);
   const { content, usage, model, cost } = await callDeepseekStream(
     prompt,
@@ -931,6 +978,7 @@ async function generateResumeStream(userInput, options = {}, onChunk) {
       responseFormat: { type: 'json_object' },
     },
     onChunk,
+    onStatus,
   );
   const parsed = extractJson(content);
   return {
@@ -943,7 +991,7 @@ async function generateResumeStream(userInput, options = {}, onChunk) {
  * 从 PDF 解析文本或用户粘贴文本中纯识别结构化简历。
  * 这里刻意使用独立 Prompt，不复用任何生成/优化提示词，避免识别阶段改写原始内容。
  */
-async function extractResumeFromTextStream(resumeText, options = {}, onChunk) {
+async function extractResumeFromTextStream(resumeText, options = {}, onChunk, onStatus) {
   const sourceText = String(resumeText || '').trim();
   // 有效字符过少时不进模型，避免无意义计费并给出更准确提示。
   const meaningfulChars = sourceText.replace(/\s+/g, '');
@@ -967,6 +1015,7 @@ async function extractResumeFromTextStream(resumeText, options = {}, onChunk) {
       responseFormat: { type: 'json_object' },
     },
     onChunk,
+    onStatus,
   );
   // 区分解析失败与合法空结果，避免 JSON 瑕疵被误报成“无简历信息”。
   const { ok, data: parsed } = extractJsonSafe(content);
@@ -1486,8 +1535,11 @@ async function optimizePdfByJdStream(pdfText, jdText = '', options = {}, onChunk
  * 基于岗位 JD 流式优化整份简历
  * @param {object} resumeJson 当前简历对象
  * @param {string} jdText 岗位 JD 文本
+ * @param {object} options 配置选项
+ * @param {Function} onChunk 内容片段回调
+ * @param {Function} onStatus 状态回调（可选）
  */
-async function optimizeResumeByJdStream(resumeJson, jdText = '', options = {}, onChunk) {
+async function optimizeResumeByJdStream(resumeJson, jdText = '', options = {}, onChunk, onStatus) {
   const resumeStr = typeof resumeJson === 'string' ? resumeJson : JSON.stringify(resumeJson || {});
   const prompt = await buildTaskPrompt(AI_TASK.JD_RESUME_OPTIMIZE, {
     jd_text: jdText || '',
@@ -1500,6 +1552,7 @@ async function optimizeResumeByJdStream(resumeJson, jdText = '', options = {}, o
       responseFormat: { type: 'json_object' },
     },
     onChunk,
+    onStatus,
   );
   const parsed = extractJson(content);
   return {
