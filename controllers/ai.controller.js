@@ -7,6 +7,7 @@ const aiService = require('../services/ai/ai.service');
 const resumeRepo = require('../repositories/resume.repository');
 const { ensureAiQuota, recordAiCall } = require('../services/ai/ai.quota.service');
 const { success, error, sanitizePublicError } = require('../utils/response');
+const { createSseHelper, createModelStatusCallback, AI_STAGE } = require('../utils/sseHelper');
 const multer = require('multer');
 const interviewQuestionRepo = require('../repositories/interviewQuestion.repository');
 const interviewQuestionService = require('../services/interview/interviewQuestion.service');
@@ -32,6 +33,10 @@ function getAiOptions(req, extra = {}) {
   return { model: getRequestedModel(req), userId: req.user && req.user.id, ...extra };
 }
 
+/**
+ * 设置 SSE 响应（向后兼容的简化版本）
+ * @deprecated 建议使用 createSseHelper 获取完整心跳支持
+ */
 function setupSSE(res) {
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -40,6 +45,23 @@ function setupSSE(res) {
   res.setHeader('X-Accel-Buffering', 'no');
   if (typeof res.flushHeaders === 'function') res.flushHeaders();
   return (payload) => res.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+/**
+ * 创建带心跳的 SSE 辅助对象
+ * @param {Response} res Express 响应对象
+ * @param {Object} options 配置选项
+ * @returns {{ helper: Object, sendEvent: Function }} SSE 辅助对象和兼容的 sendEvent 函数
+ */
+function setupSSEWithHeartbeat(res, options = {}) {
+  const helper = createSseHelper(res, {
+    heartbeatInterval: 15000, // 15 秒心跳间隔
+    enableHeartbeat: true,
+    ...options,
+  });
+  // 返回兼容的 sendEvent 函数，保持与旧代码的兼容性
+  const sendEvent = (payload) => helper.send(payload);
+  return { helper, sendEvent };
 }
 
 /** 统一处理 AI 接口错误，余额不足不重复加前缀 */
@@ -130,24 +152,32 @@ async function generate(req, res) {
 async function generateStream(req, res) {
   const taskType = 'resume_generate';
   const model = getRequestedModel(req);
-  const sendEvent = setupSSE(res);
+  // 使用带心跳的 SSE 辅助工具
+  const { helper, sendEvent } = setupSSEWithHeartbeat(res);
+  // 创建模型状态回调，任务阶段为 generating
+  const onStatus = createModelStatusCallback(helper, AI_STAGE.GENERATING);
+
   try {
     await ensureAiQuota(req, taskType);
+    // 发送初始状态，包含 stage 字段
+    helper.sendStatus('正在准备 AI 简历生成...', AI_STAGE.PREPARING);
+
     const body = req.body || {};
     const isLazy = body.input_mode === 'lazy';
     const aiOptions = getAiOptions(req, { inputMode: isLazy ? 'lazy' : 'form' });
     const userInput = isLazy ? body : JSON.stringify(body);
+
     const { data, meta } = await aiService.generateResumeStream(userInput, aiOptions, (chunk) => {
       sendEvent({ chunk });
-    });
+    }, onStatus);
+
     if (!data?.resume || Object.keys(data.resume).length === 0) {
       await recordAiCall(req, taskType, model, false, 'AI生成简历失败，请重试');
-      sendEvent({ error: 'AI生成简历失败，请重试' });
-      return res.end();
+      helper.sendError('AI生成简历失败，请重试');
+      return;
     }
     await recordAiCall(req, taskType, model, true, '', meta);
-    sendEvent({ done: true, data });
-    return res.end();
+    helper.sendDone({ data });
   } catch (e) {
     return respondAiError(res, e, {
       sendEvent,
@@ -164,25 +194,30 @@ async function extractResumeStream(req, res) {
   const taskType = 'resume_extract';
   const model = getRequestedModel(req);
   const rawText = String(req.body?.raw_text || '').trim();
-  const sendEvent = setupSSE(res);
+  // 使用带心跳的 SSE 辅助工具
+  const { helper, sendEvent } = setupSSEWithHeartbeat(res);
+  // 创建模型状态回调，任务阶段为 extracting（识别/提取）
+  const onStatus = createModelStatusCallback(helper, AI_STAGE.EXTRACTING);
 
   try {
     await ensureAiQuota(req, taskType);
-    sendEvent({ status: '正在识别文字中的简历字段...' });
+    helper.sendStatus('正在识别文字中的简历字段...', AI_STAGE.EXTRACTING);
+
     const { data, meta } = await aiService.extractResumeFromTextStream(
       rawText,
       getAiOptions(req),
       (chunk) => sendEvent({ chunk }),
+      onStatus,
     );
+
     if (!data?.resume || Object.keys(data.resume).length === 0) {
       await recordAiCall(req, taskType, model, false, '未能识别出有效简历信息');
-      sendEvent({ error: '未能识别出有效简历信息，请检查文字内容后重试' });
-      return res.end();
+      helper.sendError('未能识别出有效简历信息，请检查文字内容后重试');
+      return;
     }
 
     await recordAiCall(req, taskType, model, true, '', meta);
-    sendEvent({ done: true, data: { resume: data.resume } });
-    return res.end();
+    helper.sendDone({ data: { resume: data.resume } });
   } catch (e) {
     return respondAiError(res, e, {
       sendEvent,
@@ -226,9 +261,15 @@ async function optimizeByJdStream(req, res) {
     return error(res, 400, 'jd_text 不能为空');
   }
 
-  const sendEvent = setupSSE(res);
+  // 使用带心跳的 SSE 辅助工具
+  const { helper, sendEvent } = setupSSEWithHeartbeat(res);
+  // 创建模型状态回调，任务阶段为 optimizing
+  const onStatus = createModelStatusCallback(helper, AI_STAGE.OPTIMIZING);
+
   try {
     await ensureAiQuota(req, taskType);
+    helper.sendStatus('正在基于岗位 JD 优化简历...', AI_STAGE.OPTIMIZING);
+
     const { data, meta } = await aiService.optimizeResumeByJdStream(
       resume,
       String(jdText).trim(),
@@ -236,15 +277,16 @@ async function optimizeByJdStream(req, res) {
       (chunk) => {
         sendEvent({ chunk });
       },
+      onStatus,
     );
+
     if (!data?.resume || Object.keys(data.resume).length === 0) {
       await recordAiCall(req, taskType, model, false, 'AI优化失败，请重试');
-      sendEvent({ error: 'AI优化失败，请重试' });
-      return res.end();
+      helper.sendError('AI优化失败，请重试');
+      return;
     }
     await recordAiCall(req, taskType, model, true, '', meta);
-    sendEvent({ done: true, data });
-    return res.end();
+    helper.sendDone({ data });
   } catch (e) {
     return respondAiError(res, e, {
       sendEvent,
@@ -356,9 +398,21 @@ async function optimizeStream(req, res) {
     return error(res, 400, '请先填写意向岗位');
   }
 
-  const sendEvent = setupSSE(res);
+  // 优化类型中文名称映射
+  const typeNameMap = {
+    summary: '个人评价',
+    skills: '技能特长',
+    project: '项目经历',
+    internship: '实习经历',
+    work_experience: '工作经历',
+  };
+
+  // 使用带心跳的 SSE 辅助工具
+  const { helper, sendEvent } = setupSSEWithHeartbeat(res);
+
   try {
     await ensureAiQuota(req, taskType);
+    helper.sendStatus(`正在优化${typeNameMap[type] || type}...`, AI_STAGE.OPTIMIZING);
 
     let serviceResult;
     if (type === 'summary') {
@@ -372,8 +426,8 @@ async function optimizeStream(req, res) {
     } else if (type === 'project') {
       const project = resume?.projects?.[index];
       if (!project) {
-        sendEvent({ error: '项目不存在' });
-        return res.end();
+        helper.sendError('项目不存在');
+        return;
       }
       serviceResult = await aiService.optimizeProjectStream(project, resume, targetPosition, getAiOptions(req), (chunk) => {
         sendEvent({ chunk });
@@ -381,8 +435,8 @@ async function optimizeStream(req, res) {
     } else if (type === 'internship') {
       const internship = resume?.internships?.[index];
       if (!internship) {
-        sendEvent({ error: '实习经历不存在' });
-        return res.end();
+        helper.sendError('实习经历不存在');
+        return;
       }
       serviceResult = await aiService.optimizeInternshipStream(internship, resume, targetPosition, getAiOptions(req), (chunk) => {
         sendEvent({ chunk });
@@ -391,8 +445,8 @@ async function optimizeStream(req, res) {
       // 工作经历（正式全职）优化
       const workExp = resume?.work_experiences?.[index];
       if (!workExp) {
-        sendEvent({ error: '工作经历不存在' });
-        return res.end();
+        helper.sendError('工作经历不存在');
+        return;
       }
       serviceResult = await aiService.optimizeWorkExperienceStream(workExp, resume, targetPosition, getAiOptions(req), (chunk) => {
         sendEvent({ chunk });
@@ -401,13 +455,12 @@ async function optimizeStream(req, res) {
 
     if (!serviceResult?.data || Object.keys(serviceResult.data).length === 0) {
       await recordAiCall(req, taskType, model, false, 'AI优化失败，请重试');
-      sendEvent({ error: 'AI优化失败，请重试' });
-      return res.end();
+      helper.sendError('AI优化失败，请重试');
+      return;
     }
 
     await recordAiCall(req, taskType, model, true, '', serviceResult.meta);
-    sendEvent({ done: true, data: serviceResult.data });
-    return res.end();
+    helper.sendDone({ data: serviceResult.data });
   } catch (e) {
     return respondAiError(res, e, {
       sendEvent,
@@ -453,17 +506,21 @@ async function score(req, res) {
 async function scoreStream(req, res) {
   const taskType = 'score';
   const model = getRequestedModel(req);
-  const sendEvent = setupSSE(res);
+  // 使用带心跳的 SSE 辅助工具
+  const { helper, sendEvent } = setupSSEWithHeartbeat(res);
+
   try {
     await ensureAiQuota(req, taskType);
+    helper.sendStatus('正在评估简历质量...', AI_STAGE.ANALYZING);
+
     const resumeId = req.query.resume_id || req.body?.resume_id;
     const resumeJson = await getResumeJson(req, resumeId);
     const { data: scoreData, meta } = await aiService.scoreResumeStream(resumeJson, getAiOptions(req), (chunk) => {
       sendEvent({ chunk });
     });
+
     await recordAiCall(req, taskType, model, true, '', meta);
-    sendEvent({ done: true, data: scoreData });
-    return res.end();
+    helper.sendDone({ data: scoreData });
   } catch (e) {
     return respondAiError(res, e, {
       sendEvent,
